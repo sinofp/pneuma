@@ -31,7 +31,7 @@
             buildInputs = with pkgs; [
               # Unwrapped LLVM/clang for bare-metal RISC-V development
               llvmPackages_latest.clang-unwrapped
-              llvmPackages_latest.lld
+              llvmPackages_latest.bintools-unwrapped  # includes lld, llvm-nm, llvm-objdump, etc.
               # OpenSBI firmware for RISC-V (pre-built)
               opensbi
               (qemu.override {
@@ -77,18 +77,26 @@
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
           default = pkgs.runCommand "build kernel" {
-            nativeBuildInputs = with pkgs.llvmPackages_latest; [ clang-unwrapped lld ];
+            nativeBuildInputs = with pkgs.llvmPackages_latest; [ clang-unwrapped bintools-unwrapped ];
           } ''
             mkdir -p $out
+            # Copy source files to build directory
+            cp ${./kernel.c} kernel.c
+            cp ${./kernel.h} kernel.h
+            cp ${./common.c} common.c
+            cp ${./common.h} common.h
+            cp ${./kernel.ld} kernel.ld
+
             ${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang \
               -std=c11 -O2 -g3 -Wall -Wextra \
               --target=riscv32-unknown-elf \
               -fno-stack-protector -ffreestanding -nostdlib \
               --ld-path=${pkgs.llvmPackages_latest.lld}/bin/ld.lld \
-              -Wl,-T${./kernel.ld} \
+              -Wl,-Tkernel.ld \
               -Wl,-Map=$out/kernel.map \
               -o $out/kernel.elf \
-              ${./kernel.c}
+              kernel.c \
+	      common.c
           '';
         }
       );
