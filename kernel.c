@@ -5,7 +5,19 @@ typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef uint32_t size_t;
 
-extern char __bss[], __bss_end[], __stack_top[];
+extern char __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
+
+paddr_t alloc_pages(uint32_t n) {
+    static paddr_t next_paddr = (paddr_t) __free_ram;
+    paddr_t paddr = next_paddr;
+    next_paddr += n * PAGE_SIZE;
+
+    if (next_paddr > (paddr_t) __free_ram_end)
+        PANIC("out of memory");
+
+    memset((void *) paddr, 0, n * PAGE_SIZE);
+    return paddr;
+}
 
 __attribute__((naked))
 __attribute__((aligned(4)))
@@ -138,6 +150,11 @@ void kernel_main() {
 
     printf("\n\nHello %s\n", "World!");
     printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
+
+    paddr_t paddr0 = alloc_pages(2);
+    paddr_t paddr1 = alloc_pages(1);
+    printf("alloc_pages test: paddr0=%x\n", paddr0);
+    printf("alloc_pages test: paddr1=%x\n", paddr1);
 
     __asm__ __volatile__("unimp");
 
