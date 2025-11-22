@@ -5,7 +5,7 @@ typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef uint32_t size_t;
 
-extern char __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
+extern char __kernel_base[], __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
 paddr_t alloc_pages(uint32_t n) {
     static paddr_t next_paddr = (paddr_t) __free_ram;
@@ -17,6 +17,32 @@ paddr_t alloc_pages(uint32_t n) {
 
     memset((void *) paddr, 0, n * PAGE_SIZE);
     return paddr;
+}
+
+void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+    if (!is_aligned(vaddr, PAGE_SIZE))
+        PANIC("unaligned vaddr %x", vaddr);
+
+    if (!is_aligned(paddr, PAGE_SIZE))
+        PANIC("unaligned paddr %x", paddr);
+
+    // TODO recurisive?
+
+    uint32_t vpn1 = vaddr >> 22;
+    uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
+    uint32_t pte = table1[vpn1];
+    if (!(pte & PAGE_V)) {
+        // Create the first level page if it doesn't exist
+        paddr_t pt_paddr = alloc_pages(1);
+        uint32_t ppn = pt_paddr / PAGE_SIZE;
+        table1[vpn1] = pte = ppn << 10 | PAGE_V;
+    }
+
+    uint32_t ppn = pte >> 10;
+    paddr_t *table0 = (uint32_t *) (ppn * PAGE_SIZE);
+    ppn = paddr / PAGE_SIZE; // == >> 12, why waste the last two bits of PTE?
+    pte = ppn << 10 | flags | PAGE_V;
+    table0[vpn0] = pte;
 }
 
 __attribute__((naked))
@@ -212,10 +238,20 @@ struct process *create_process(uint32_t pc) {
     sp -= 13; // Space for s11, s10, ... s0, and finally ra
     *sp = (uint32_t) pc;
 
+    // Map kernel pages.
+    // Map everything from __kernel_base to __free_ram_end.
+    // This approach ensures that the kernel can always access both statically allocated areas (like .text), and dynamically allocated areas managed by alloc_pages
+    paddr_t *page_table = (paddr_t *) alloc_pages(1);
+    for (paddr_t paddr = (paddr_t) __kernel_base;
+    // for (paddr_t paddr = (paddr_t) __free_ram;
+         paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE)
+        map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+
     // Initialize fields.
     proc->pid = i + 1;
     proc->state = PROC_RUNNABLE;
     proc->sp = (uint32_t) sp;
+    proc->page_table = page_table;
     return proc;
 }
 
@@ -237,11 +273,17 @@ void yield(void) {
     if (next == current_proc)
         return;
 
-    // Save the kernel stack for the currently executing process for exception handling
     __asm__ __volatile__(
+        // Switch page table
+        "sfence.vma\n"
+        "csrw satp, %[satp]\n"
+        "sfence.vma\n"
+
+        // Save the kernel stack for the currently executing process for exception handling
         "csrw sscratch, %[sscratch]\n"
         :
-        : [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)])
+        : [satp] "r" (SATP_SV32 | ((uint32_t) next->page_table / PAGE_SIZE)),
+          [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)])
     );
 
     // Context switch

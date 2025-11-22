@@ -17,5 +17,5 @@ if [ "${1:-}" = "--debug" ]; then
     $QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf -s -S
 else
     # Start QEMU normally
-    $QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf
+    $QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf -d unimp,guest_errors,int,cpu_reset -D qemu.log
 fi
