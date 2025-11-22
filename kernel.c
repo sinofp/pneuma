@@ -141,14 +141,6 @@ void kernel_entry(void) {
     );
 }
 
-void handle_trap(struct trap_frame *f) {
-    uint32_t scause = READ_CSR(scause);
-    uint32_t stval = READ_CSR(stval);
-    uint32_t user_pc = READ_CSR(sepc);
-
-    PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval, user_pc);
-}
-
 struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
                        long arg5, long fid, long eid) {
     register long a0 __asm__("a0") = arg0;
@@ -179,6 +171,11 @@ void puts(const char *s) {
     for (num_bytes = 0; s[num_bytes] != '\0'; ++num_bytes) {}
     long base_addr = (long) s;
     sbi_call(num_bytes, base_addr, 0, 0, 0, 0, 0, 0x4442434E);
+}
+
+long getchar() {
+    struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
+    return ret.error;
 }
 
 __attribute__((naked)) void switch_context(uint32_t *prev_sp,
@@ -292,7 +289,7 @@ struct process *create_process(const void *image, size_t image_size) {
 struct process *current_proc; // Currently running process
 struct process *idle_proc;    // Idle process
 
-void yield(void) {
+void yield() {
     // Search for a runnable process
     struct process *next = idle_proc;
     for (int i = 0; i < PROCS_MAX; i++) {
@@ -326,30 +323,46 @@ void yield(void) {
     switch_context(&prev->sp, &next->sp);
 }
 
-void delay(void) {
-    for (int i = 0; i < 30000000; i++)
-        __asm__ __volatile__("nop"); // do nothing
-}
-
-struct process *proc_a;
-struct process *proc_b;
-
-void proc_a_entry(void) {
-    printf("starting process a\n");
-    while (1) {
-        putchar('A');
-        yield();
-        delay();
+void handle_syscall(struct trap_frame *f) {
+    switch (f->a3) {
+        case SYS_PUTCHAR:
+            putchar(f->a0);
+            break;
+        case SYS_GETCHAR:
+	    for (;;) {
+                long ch = getchar();
+                if (ch >= 0) {
+                    f->a0 = ch;
+                    break;
+                }
+                yield();
+            }
+            break;
+        case SYS_EXIT:
+            printf("process %d exited\n", current_proc->pid);
+            current_proc->state = PROC_EXITED;
+	    // TODO free resources of exited proc
+            yield();
+            PANIC("unreachable");
+        default:
+            PANIC("unexpected syscall a3=%x\n", f->a3);
     }
 }
 
-void proc_b_entry(void) {
-    printf("starting process b\n");
-    while (1) {
-        putchar('B');
-        yield();
-        delay();
+void handle_trap(struct trap_frame *f) {
+    uint32_t scause = READ_CSR(scause);
+    uint32_t stval = READ_CSR(stval);
+    uint32_t user_pc = READ_CSR(sepc);
+
+    if (scause == SCAUSE_ECALL) {
+        handle_syscall(f);
+	// Advance an instruction to skip the ecall
+        user_pc += 4;
+    } else {
+        PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval, user_pc);
     }
+
+    WRITE_CSR(sepc, user_pc);
 }
 
 void kernel_main() {

@@ -3,3 +3,4 @@
 
 __attribute__((noreturn)) void exit(void);
 void putchar(char ch);
+void puts(const char *);
