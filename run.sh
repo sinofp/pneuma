@@ -10,5 +10,12 @@ OPENSBI_FW="$QEMU_OPENSBI/share/opensbi/ilp32/generic/firmware/fw_dynamic.bin"
 # Build the kernel using nix
 nix build
 
-# Start QEMU
-$QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf
+# Check for --debug argument
+if [ "${1:-}" = "--debug" ]; then
+    echo "Starting QEMU with GDB server on port 1234"
+    echo "Connect with: ./debug.sh"
+    $QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf -s -S
+else
+    # Start QEMU normally
+    $QEMU -machine virt -bios "$OPENSBI_FW" -nographic -serial mon:stdio --no-reboot -kernel result/kernel.elf
+fi
