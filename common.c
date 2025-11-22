@@ -1,7 +1,7 @@
 #include "common.h"
 
-extern void putchar(char);
-extern void puts(const char *);
+void putchar(char);
+void puts(const char *);
 
 void *memcpy(void *dst, const void *src, size_t n) {
     uint8_t *d = (uint8_t *) dst;
@@ -53,7 +53,7 @@ void printf(const char *fmt, ...) {
                     break;
                 case 's': { // Print a NULL-terminated string.
                     const char *s = va_arg(vargs, const char *);
-		    puts(s);
+		    // puts(s);
                     break;
                 }
                 case 'd': { // Print an integer in decimal.

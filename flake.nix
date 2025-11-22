@@ -74,29 +74,68 @@
       );
 
       packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system};
-        in {
-          default = pkgs.runCommand "build kernel" {
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          clang = "${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang";
+          objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
+          cflags = "-std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fno-stack-protector -ffreestanding -nostdlib";
+          ldPath = "--ld-path=${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
+
+          # Build the shell application
+          shell = pkgs.runCommand "build-shell" {
             nativeBuildInputs = with pkgs.llvmPackages_latest; [ clang-unwrapped bintools-unwrapped ];
           } ''
             mkdir -p $out
-            # Copy source files to build directory
+            # Copy source files
+            cp ${./shell.c} shell.c
+            cp ${./user.c} user.c
+            cp ${./user.h} user.h
+            cp ${./common.c} common.c
+            cp ${./common.h} common.h
+            cp ${./user.ld} user.ld
+
+            # Build shell.elf
+            ${clang} ${cflags} ${ldPath} \
+              -Wl,-Tuser.ld \
+              -Wl,-Map=$out/shell.map \
+              -o $out/shell.elf \
+              shell.c user.c common.c
+
+            # Convert to binary
+            ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+              $out/shell.elf $out/shell.bin
+
+            # Convert binary to ELF object with clean symbol names
+            # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
+            cd $out
+            ${objcopy} -I binary -O elf32-littleriscv \
+              shell.bin shell.bin.o
+          '';
+        in {
+          # Shell application package
+          shell = shell;
+
+          # Kernel package (default)
+          default = pkgs.runCommand "build-kernel" {
+            nativeBuildInputs = with pkgs.llvmPackages_latest; [ clang-unwrapped bintools-unwrapped ];
+          } ''
+            mkdir -p $out
+            # Copy source files
             cp ${./kernel.c} kernel.c
             cp ${./kernel.h} kernel.h
             cp ${./common.c} common.c
             cp ${./common.h} common.h
             cp ${./kernel.ld} kernel.ld
 
-            ${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang \
-              -std=c11 -O2 -g3 -Wall -Wextra \
-              --target=riscv32-unknown-elf \
-              -fno-stack-protector -ffreestanding -nostdlib \
-              --ld-path=${pkgs.llvmPackages_latest.lld}/bin/ld.lld \
+            # Copy the embedded shell object
+            cp ${shell}/shell.bin.o shell.bin.o
+
+            # Build kernel.elf with embedded shell
+            ${clang} ${cflags} ${ldPath} \
               -Wl,-Tkernel.ld \
               -Wl,-Map=$out/kernel.map \
               -o $out/kernel.elf \
-              kernel.c \
-	      common.c
+              kernel.c common.c shell.bin.o
           '';
         }
       );
