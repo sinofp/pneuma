@@ -52,16 +52,14 @@ void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     table0[vpn0] = pte;
 }
 
-__attribute__((naked))
-__attribute__((aligned(4)))
-void kernel_entry(void) {
+__attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
     __asm__ __volatile__(
         // We must not trust the stack pointer at the time of exception.
         // Retrieve the kernel stack of the running process from sscratch.
         "csrrw sp, sscratch, sp\n"
 
-	// sp now points to the kernel (not user) stack of the currently running process.
-	// sscratch now holds the original value of sp (user stack) at the time of the exception
+        // sp now points to the kernel (not user) stack of the currently running process.
+        // sscratch now holds the original value of sp (user stack) at the time of the exception
 
         "addi sp, sp, -4 * 31\n"
         "sw ra,  4 * 0(sp)\n"
@@ -99,7 +97,7 @@ void kernel_entry(void) {
         "csrr a0, sscratch\n"
         "sw a0, 4 * 30(sp)\n"
 
-	// Reset the kernel stack.
+        // Reset the kernel stack.
         "addi a0, sp, 4 * 31\n"
         "csrw sscratch, a0\n"
 
@@ -137,12 +135,10 @@ void kernel_entry(void) {
         "lw s10, 4 * 28(sp)\n"
         "lw s11, 4 * 29(sp)\n"
         "lw sp,  4 * 30(sp)\n"
-        "sret\n"
-    );
+        "sret\n");
 }
 
-struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
-                       long arg5, long fid, long eid) {
+struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long fid, long eid) {
     register long a0 __asm__("a0") = arg0;
     register long a1 __asm__("a1") = arg1;
     register long a2 __asm__("a2") = arg2;
@@ -154,10 +150,9 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
 
     __asm__ __volatile__("ecall"
                          : "=r"(a0), "=r"(a1)
-                         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5),
-                           "r"(a6), "r"(a7)
+                         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
                          : "memory");
-    return (struct sbiret){.error = a0, .value = a1};
+    return (struct sbiret) { .error = a0, .value = a1 };
 }
 
 void putchar(char ch) {
@@ -166,9 +161,11 @@ void putchar(char ch) {
 }
 
 void puts(const char *s) {
-    // DBCN: Console Write (FID #0) struct sbiret sbi_debug_console_write(unsigned long num_bytes, unsigned long base_addr_lo, unsigned long base_addr_hi)
+    // DBCN: Console Write (FID #0) struct sbiret sbi_debug_console_write(unsigned long num_bytes, unsigned long
+    // base_addr_lo, unsigned long base_addr_hi)
     unsigned long num_bytes;
-    for (num_bytes = 0; s[num_bytes] != '\0'; ++num_bytes) {}
+    for (num_bytes = 0; s[num_bytes] != '\0'; ++num_bytes) {
+    }
     long base_addr = (long) s;
     sbi_call(num_bytes, base_addr, 0, 0, 0, 0, 0, 0x4442434E);
 }
@@ -178,8 +175,7 @@ long getchar() {
     return ret.error;
 }
 
-__attribute__((naked)) void switch_context(uint32_t *prev_sp,
-                                           uint32_t *next_sp) {
+__attribute__((naked)) void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
     __asm__ __volatile__(
         // Save callee-saved registers onto the current process's stack.
         "addi sp, sp, -13 * 4\n" // Allocate stack space for 13 4-byte registers
@@ -198,11 +194,11 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
         "sw s11, 12 * 4(sp)\n"
 
         // Switch the stack pointer.
-        "sw sp, (a0)\n"         // *prev_sp = sp;
-        "lw sp, (a1)\n"         // Switch stack pointer (sp) here
+        "sw sp, (a0)\n" // *prev_sp = sp;
+        "lw sp, (a1)\n" // Switch stack pointer (sp) here
 
         // Restore callee-saved registers from the next process's stack.
-        "lw ra,  0  * 4(sp)\n"  // Restore callee-saved registers only
+        "lw ra,  0  * 4(sp)\n" // Restore callee-saved registers only
         "lw s0,  1  * 4(sp)\n"
         "lw s1,  2  * 4(sp)\n"
         "lw s2,  3  * 4(sp)\n"
@@ -215,21 +211,17 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
         "lw s9,  10 * 4(sp)\n"
         "lw s10, 11 * 4(sp)\n"
         "lw s11, 12 * 4(sp)\n"
-        "addi sp, sp, 13 * 4\n"  // We've popped 13 4-byte registers from the stack
-        "ret\n"
-    );
+        "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the stack
+        "ret\n");
 }
 
 // ↓ __attribute__((naked)) is very important!
 __attribute__((naked)) void user_entry(void) {
-    __asm__ __volatile__(
-        "csrw sepc, %[sepc]        \n"
-        "csrw sstatus, %[sstatus]  \n"
-        "sret                      \n"
-        :
-        : [sepc] "r" (USER_BASE),
-          [sstatus] "r" (SSTATUS_SPIE)
-    );
+    __asm__ __volatile__("csrw sepc, %[sepc]        \n"
+                         "csrw sstatus, %[sstatus]  \n"
+                         "sret                      \n"
+                         :
+                         : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
 }
 
 struct process procs[PROCS_MAX]; // All process control structures.
@@ -251,15 +243,16 @@ struct process *create_process(const void *image, size_t image_size) {
     // Stack callee-saved registers. These register values will be restored in
     // the first context switch in switch_context.
     uint32_t *sp = (uint32_t *) &proc->stack[sizeof(proc->stack)]; // the stack grows downward
-    sp -= 13; // Space for s11, s10, ... s0, and finally ra
+    sp -= 13;                                                      // Space for s11, s10, ... s0, and finally ra
     *sp = (uint32_t) user_entry;
 
     // Map kernel pages.
     // Map everything from __kernel_base to __free_ram_end.
-    // This approach ensures that the kernel can always access both statically allocated areas (like .text), and dynamically allocated areas managed by alloc_pages
+    // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
+    // dynamically allocated areas managed by alloc_pages
     paddr_t *page_table = (paddr_t *) alloc_pages(1);
     for (paddr_t paddr = (paddr_t) __kernel_base;
-    // for (paddr_t paddr = (paddr_t) __free_ram;
+         // for (paddr_t paddr = (paddr_t) __free_ram;
          paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE)
         map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
 
@@ -274,8 +267,7 @@ struct process *create_process(const void *image, size_t image_size) {
 
         // Fill and map the page.
         memcpy((void *) page, image + off, copy_size);
-        map_page(page_table, USER_BASE + off, page,
-                 PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+        map_page(page_table, USER_BASE + off, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
     // Initialize fields.
@@ -313,9 +305,9 @@ void yield() {
         // Save the kernel stack for the currently executing process for exception handling
         "csrw sscratch, %[sscratch]\n"
         :
-        : [satp] "r" (SATP_SV32 | ((uint32_t) next->page_table / PAGE_SIZE)),
-          [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)])
-    );
+        : [satp] "r"(SATP_SV32 | ((uint32_t) next->page_table / PAGE_SIZE)), [sscratch] "r"(
+                                                                                 (uint32_t) &next->stack[sizeof(
+                                                                                     next->stack)]));
 
     // Context switch
     struct process *prev = current_proc;
@@ -325,27 +317,27 @@ void yield() {
 
 void handle_syscall(struct trap_frame *f) {
     switch (f->a3) {
-        case SYS_PUTCHAR:
-            putchar(f->a0);
-            break;
-        case SYS_GETCHAR:
-	    for (;;) {
-                long ch = getchar();
-                if (ch >= 0) {
-                    f->a0 = ch;
-                    break;
-                }
-                yield();
+    case SYS_PUTCHAR:
+        putchar(f->a0);
+        break;
+    case SYS_GETCHAR:
+        for (;;) {
+            long ch = getchar();
+            if (ch >= 0) {
+                f->a0 = ch;
+                break;
             }
-            break;
-        case SYS_EXIT:
-            printf("process %d exited\n", current_proc->pid);
-            current_proc->state = PROC_EXITED;
-	    // TODO free resources of exited proc
             yield();
-            PANIC("unreachable");
-        default:
-            PANIC("unexpected syscall a3=%x\n", f->a3);
+        }
+        break;
+    case SYS_EXIT:
+        printf("process %d exited\n", current_proc->pid);
+        current_proc->state = PROC_EXITED;
+        // TODO free resources of exited proc
+        yield();
+        PANIC("unreachable");
+    default:
+        PANIC("unexpected syscall a3=%x\n", f->a3);
     }
 }
 
@@ -356,7 +348,7 @@ void handle_trap(struct trap_frame *f) {
 
     if (scause == SCAUSE_ECALL) {
         handle_syscall(f);
-	// Advance an instruction to skip the ecall
+        // Advance an instruction to skip the ecall
         user_pc += 4;
     } else {
         PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval, user_pc);
@@ -394,14 +386,10 @@ void kernel_main() {
     PANIC("switched to idle process");
 }
 
-__attribute__((section(".text.boot")))
-__attribute__((naked))
-void boot() {
-    __asm__ __volatile__(
-        "mv sp, %[stack_top]\n" // Set the stack pointer
-        "j kernel_main\n"       // Jump to the kernel main function
-        :
-        : [stack_top] "r" (__stack_top) // Pass the stack top address as %[stack_top]
+__attribute__((section(".text.boot"))) __attribute__((naked)) void boot() {
+    __asm__ __volatile__("mv sp, %[stack_top]\n" // Set the stack pointer
+                         "j kernel_main\n"       // Jump to the kernel main function
+                         :
+                         : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
     );
 }
-

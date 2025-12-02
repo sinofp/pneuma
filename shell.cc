@@ -1,9 +1,8 @@
 #include "user.h"
 
-extern "C"
-void main(void) {
+extern "C" void main(void) {
     for (;;) {
-prompt:
+    prompt:
         puts("> ");
         char cmdline[128];
         for (int i = 0;; i++) {

@@ -1,5 +1,3 @@
 #include <stdio.h>
 
-int main() {
-	printf("Hello RISC-V!");
-}
+int main() { printf("Hello RISC-V!"); }

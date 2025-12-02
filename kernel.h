@@ -5,14 +5,15 @@ struct sbiret {
     long error;
     union {
         long value;
-	unsigned long uvalue;
+        unsigned long uvalue;
     };
 };
 
-#define PANIC(fmt, ...)                                                        \
-    do {                                                                       \
-        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);  \
-        while (1) {}                                                           \
+#define PANIC(fmt, ...)                                                                                                \
+    do {                                                                                                               \
+        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                          \
+        while (1) {                                                                                                    \
+        }                                                                                                              \
     } while (0)
 
 struct trap_frame {
@@ -49,24 +50,24 @@ struct trap_frame {
     uint32_t sp;
 } __attribute__((packed));
 
-#define READ_CSR(reg)                                                          \
-    ({                                                                         \
-        unsigned long __tmp;                                                   \
-        __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                  \
-        __tmp;                                                                 \
+#define READ_CSR(reg)                                                                                                  \
+    ({                                                                                                                 \
+        unsigned long __tmp;                                                                                           \
+        __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                                                          \
+        __tmp;                                                                                                         \
     })
 
-#define WRITE_CSR(reg, value)                                                  \
-    do {                                                                       \
-        uint32_t __tmp = (value);                                              \
-        __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp));                \
+#define WRITE_CSR(reg, value)                                                                                          \
+    do {                                                                                                               \
+        uint32_t __tmp = (value);                                                                                      \
+        __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp));                                                        \
     } while (0)
 
-#define PROCS_MAX 8       // Maximum number of processes
+#define PROCS_MAX 8 // Maximum number of processes
 
-#define PROC_UNUSED   0   // Unused process control structure
-#define PROC_RUNNABLE 1   // Runnable process
-#define PROC_EXITED   2
+#define PROC_UNUSED 0   // Unused process control structure
+#define PROC_RUNNABLE 1 // Runnable process
+#define PROC_EXITED 2
 
 struct process {
     int pid;             // Process ID
@@ -77,11 +78,11 @@ struct process {
 };
 
 #define SATP_SV32 (1u << 31)
-#define PAGE_V    (1 << 0)   // "Valid" bit (entry is enabled)
-#define PAGE_R    (1 << 1)   // Readable
-#define PAGE_W    (1 << 2)   // Writable
-#define PAGE_X    (1 << 3)   // Executable
-#define PAGE_U    (1 << 4)   // User (accessible in user mode)
+#define PAGE_V (1 << 0) // "Valid" bit (entry is enabled)
+#define PAGE_R (1 << 1) // Readable
+#define PAGE_W (1 << 2) // Writable
+#define PAGE_X (1 << 3) // Executable
+#define PAGE_U (1 << 4) // User (accessible in user mode)
 
 #define SSTATUS_SPIE (1 << 5)
 
