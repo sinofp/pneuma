@@ -1,6 +1,13 @@
 #pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "common.h"
 
 __attribute__((noreturn)) void exit(void);
-void putchar(char ch);
-void puts(const char *);
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,5 +1,6 @@
 #include "user.h"
 
+extern "C"
 void main(void) {
     for (;;) {
 prompt:
