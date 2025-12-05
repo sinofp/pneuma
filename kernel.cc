@@ -228,7 +228,7 @@ struct process procs[PROCS_MAX]; // All process control structures.
 
 struct process *create_process(const void *image, size_t image_size) {
     // Find an unused process control structure.
-    struct process *proc = NULL;
+    struct process *proc = nullptr;
     int i;
     for (i = 0; i < PROCS_MAX; i++) {
         if (procs[i].state == PROC_UNUSED) {
@@ -266,7 +266,7 @@ struct process *create_process(const void *image, size_t image_size) {
         size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
 
         // Fill and map the page.
-        memcpy((void *) page, image + off, copy_size);
+        memcpy((void *) page, static_cast<const uint8_t *>(image) + off, copy_size);
         map_page(page_table, USER_BASE + off, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
@@ -341,6 +341,7 @@ void handle_syscall(struct trap_frame *f) {
     }
 }
 
+extern "C"
 void handle_trap(struct trap_frame *f) {
     uint32_t scause = READ_CSR(scause);
     uint32_t stval = READ_CSR(stval);
@@ -357,6 +358,7 @@ void handle_trap(struct trap_frame *f) {
     WRITE_CSR(sepc, user_pc);
 }
 
+extern "C"
 void kernel_main() {
     memset(__bss, 0, (size_t) __bss_end - (size_t) __bss);
 
@@ -376,7 +378,7 @@ void kernel_main() {
     printf("alloc_pages test: paddr0=%x\n", paddr0);
     printf("alloc_pages test: paddr1=%x\n", paddr1);
 
-    idle_proc = create_process(NULL, 0);
+    idle_proc = create_process(nullptr, 0);
     idle_proc->pid = 0; // idle
     current_proc = idle_proc;
 

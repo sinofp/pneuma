@@ -148,7 +148,7 @@
               ''
                 mkdir -p $out
                 # Copy source files
-                cp ${./kernel.c} kernel.c
+                cp ${./kernel.cc} kernel.cc
                 cp ${./kernel.h} kernel.h
                 cp ${./common.cc} common.cc
                 cp ${./common.h} common.h
@@ -157,16 +157,13 @@
                 # Copy the embedded shell object
                 cp ${shell}/shell.bin.o shell.bin.o
 
-                # Compile C++ file
-                ${clang} ${ccflags} -c -o common.o common.cc
-
                 # Build kernel.elf with embedded shell
-                ${clang} ${cflags} \
+                ${clang} ${ccflags} \
                 --ld-path=${lld} \
                 -Wl,-Tkernel.ld \
                 -Wl,-Map=$out/kernel.map \
                 -o $out/kernel.elf \
-                kernel.c common.o shell.bin.o
+                kernel.cc common.cc shell.bin.o
               '';
         }
       );
