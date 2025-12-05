@@ -341,8 +341,7 @@ void handle_syscall(struct trap_frame *f) {
     }
 }
 
-extern "C"
-void handle_trap(struct trap_frame *f) {
+extern "C" void handle_trap(struct trap_frame *f) {
     uint32_t scause = READ_CSR(scause);
     uint32_t stval = READ_CSR(stval);
     uint32_t user_pc = READ_CSR(sepc);
@@ -358,8 +357,7 @@ void handle_trap(struct trap_frame *f) {
     WRITE_CSR(sepc, user_pc);
 }
 
-extern "C"
-void kernel_main() {
+extern "C" void kernel_main() {
     memset(__bss, 0, (size_t) __bss_end - (size_t) __bss);
 
     WRITE_CSR(stvec, (uint32_t) kernel_entry);

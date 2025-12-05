@@ -1,18 +1,18 @@
 #include "common.h"
 
-void *memcpy(void *dst, const void *src, size_t n) {
-    uint8_t *d = (uint8_t *) dst;
-    const uint8_t *s = (uint8_t *) src;
+void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
+    auto *d = static_cast<uint8_t *>(dst);
+    auto *s = static_cast<const uint8_t *>(src);
     for (size_t i = 0; i < n; ++i)
         d[i] = s[i];
-    return dst;
+    return dst; // C Manual: 'Returns the original value of dst'
 }
 
-void *memset(void *buf, char c, size_t n) {
-    uint8_t *p = (uint8_t *) buf;
-    while (n--)
-        *p++ = c;
-    return buf;
+void *memset(void *b, int c, size_t len) {
+    auto *p = static_cast<uint8_t *>(b);
+    while (len--)
+        *p++ = static_cast<unsigned char>(c); // C standard historical design
+    return b;                                 // C Manual: 'Returns its first argument'
 }
 
 char *strcpy(char *dst, const char *src) {
@@ -24,31 +24,30 @@ char *strcpy(char *dst, const char *src) {
 }
 
 int strcmp(const char *s1, const char *s2) {
-    while (*s1 && *s2) {
-        if (*s1 != *s2)
-            break;
-        s1++;
-        s2++;
+    for (; *s1 and *s2 and *s1 == *s2; ++s1, ++s2) {
     }
-
-    return *(unsigned char *) s1 - *(unsigned char *) s2;
+    // C Manual: 'The comparison is done using unsigned characters'
+    // Calling Convention: 'The C types char and unsigned char are 8-bit unsigned integers and are zero-extended when
+    // stored in a RISC-V integer register.' Therefore we don't need to cast on RISC-V.
+    // TODO test 128 and 0
+    return *s1 - *s2;
 }
 
-void printf(const char *fmt, ...) {
+void printf(const char *__restrict__ format, ...) {
     va_list vargs;
-    va_start(vargs, fmt);
+    va_start(vargs, format);
 
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;          // Skip '%'
-            switch (*fmt) { // Read the next character
-            case '\0':      // '%' at the end of the format string
+    while (*format) {
+        if (*format == '%') {
+            ++format;          // Skip '%'
+            switch (*format) { // Read the next character
+            case '\0':         // '%' at the end of the format string
                 putchar('%');
                 goto end;
             case '%': // Print '%'
                 putchar('%');
                 break;
-            case 's': { // Print a NULL-terminated string.
+            case 's': { // Print a NUL-terminated string.
                 const char *s = va_arg(vargs, const char *);
                 puts(s);
                 break;
@@ -74,18 +73,18 @@ void printf(const char *fmt, ...) {
                 break;
             }
             case 'x': { // Print an integer in hexadecimal.
-                unsigned value = va_arg(vargs, unsigned);
+                auto value = va_arg(vargs, unsigned);
                 for (int i = 7; i >= 0; i--) {
-                    unsigned nibble = (value >> (i * 4)) & 0xf;
+                    uint8_t nibble = (value >> (i * 4)) & 0xf; // Actually only 4-bit
                     putchar("0123456789abcdef"[nibble]);
                 }
             }
             }
         } else {
-            putchar(*fmt);
+            putchar(*format);
         }
 
-        fmt++;
+        format++;
     }
 
 end:

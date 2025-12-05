@@ -1,16 +1,20 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+// Freestanding headers provided by the compiler (not libc)
+#include <stddef.h> // size_t, ptrdiff_t, nullptr_t
+#include <stdint.h> // uint8_t, uint32_t, uintptr_t, etc.
 
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-typedef uint32_t size_t;
-typedef uint32_t paddr_t;
-typedef uint32_t vaddr_t;
+// 32-bit on RV32, 64-bit on RV64
+using vaddr_t = uintptr_t;
+
+// Sv32 has 34-bit physical address, while Sv39 has 56-bit physical address.
+// Assume we don't need more than 4GB space for RV32 with Sv32,
+// otherwise all physical address arithmetic will become 64-bit on RV32.
+// Additionaly, I only have hardware of RV64 with Sv39, so I care more about this configuration.
+using paddr_t = uintptr_t;
+
+// The same for both Sv32 and Sv39
+constexpr unsigned PAGE_SIZE = 4096;
 
 #define align_up(value, align) __builtin_align_up(value, align)
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
@@ -19,24 +23,22 @@ typedef uint32_t vaddr_t;
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
-#define PAGE_SIZE 4096
 
-void *memset(void *buf, char c, size_t n);
-void *memcpy(void *dst, const void *src, size_t n);
-char *strcpy(char *dst, const char *src);
-int strcmp(const char *s1, const char *s2);
-void printf(const char *fmt, ...);
+extern "C" {
+
+void *memcpy(void *__restrict__, const void *__restrict__, size_t);
+void *memset(void *, int, size_t);
+char *strcpy(char *, const char *); // TODO replace by strlcpy
+int strcmp(const char *, const char *);
+void printf(const char *__restrict__, ...);
 
 // Below functions are implemented in kernel using OpenSBI, and user using
 // syscall
 extern void putchar(char);
 extern void puts(const char *);
 extern long getchar();
-
-#define SYS_PUTCHAR 1
-#define SYS_GETCHAR 2
-#define SYS_EXIT 3
-
-#ifdef __cplusplus
 }
-#endif
+
+constexpr unsigned SYS_PUTCHAR = 1;
+constexpr unsigned SYS_GETCHAR = 2;
+constexpr unsigned SYS_EXIT = 3;
