@@ -109,22 +109,17 @@
                 cp ${./shell.cc} shell.cc
                 cp ${./user.cc} user.cc
                 cp ${./user.h} user.h
-                cp ${./common.c} common.c
+                cp ${./common.cc} common.cc
                 cp ${./common.h} common.h
                 cp ${./user.ld} user.ld
 
-                # Compile C++ file
-                ${clang} ${ccflags} -c -o shell.o shell.cc
-                ${clang} ${ccflags} -c -o user.o user.cc
-
-                # Compile C files
-                ${clang} ${cflags} -c -o common.o common.c
-
-                # Link together
-                ${lld} -Tuser.ld \
-                -Map=$out/shell.map \
+                # Build the shell
+                ${clang} ${ccflags} \
+                --ld-path=${lld} \
+                -Wl,-Tuser.ld \
+                -Wl,-Map=$out/shell.map \
                 -o $out/shell.elf \
-                shell.o user.o common.o
+                user.cc common.cc shell.cc
 
                 # Convert to binary
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
@@ -155,12 +150,15 @@
                 # Copy source files
                 cp ${./kernel.c} kernel.c
                 cp ${./kernel.h} kernel.h
-                cp ${./common.c} common.c
+                cp ${./common.cc} common.cc
                 cp ${./common.h} common.h
                 cp ${./kernel.ld} kernel.ld
 
                 # Copy the embedded shell object
                 cp ${shell}/shell.bin.o shell.bin.o
+
+                # Compile C++ file
+                ${clang} ${ccflags} -c -o common.o common.cc
 
                 # Build kernel.elf with embedded shell
                 ${clang} ${cflags} \
@@ -168,7 +166,7 @@
                 -Wl,-Tkernel.ld \
                 -Wl,-Map=$out/kernel.map \
                 -o $out/kernel.elf \
-                kernel.c common.c shell.bin.o
+                kernel.c common.o shell.bin.o
               '';
         }
       );

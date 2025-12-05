@@ -3,6 +3,11 @@
 #ifndef __cplusplus
 typedef int bool;
 #endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
@@ -38,3 +43,7 @@ extern long getchar();
 #define SYS_PUTCHAR 1
 #define SYS_GETCHAR 2
 #define SYS_EXIT 3
+
+#ifdef __cplusplus
+}
+#endif
