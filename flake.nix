@@ -107,7 +107,7 @@
                 mkdir -p $out
                 # Copy source files
                 cp ${./shell.cc} shell.cc
-                cp ${./user.c} user.c
+                cp ${./user.cc} user.cc
                 cp ${./user.h} user.h
                 cp ${./common.c} common.c
                 cp ${./common.h} common.h
@@ -115,9 +115,9 @@
 
                 # Compile C++ file
                 ${clang} ${ccflags} -c -o shell.o shell.cc
+                ${clang} ${ccflags} -c -o user.o user.cc
 
                 # Compile C files
-                ${clang} ${cflags} -c -o user.o user.c
                 ${clang} ${cflags} -c -o common.o common.c
 
                 # Link together
