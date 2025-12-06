@@ -14,6 +14,19 @@
         "aarch64-darwin"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
+
+      # Architecture configurations
+      archConfigs = {
+        riscv32 = {
+          target = "riscv32-unknown-elf";
+          elfFormat = "elf32-littleriscv";
+        };
+        riscv64 = {
+          target = "riscv64-unknown-elf";
+          elfFormat = "elf64-littleriscv";
+        };
+      };
+
     in
     {
       devShells = forAllSystems (
@@ -79,6 +92,18 @@
               echo "Clang: $CLANG"
               echo "LLD: $LLD"
               echo "OpenSBI firmware: $QEMU_OPENSBI"
+              echo ""
+              echo "Build targets:"
+              echo "  nix build .#rv32        # RV32 kernel"
+              echo "  nix build .#rv32-shell  # RV32 shell"
+              echo "  nix build .#rv64        # RV64 kernel"
+              echo "  nix build .#rv64-shell  # RV64 shell"
+              echo ""
+              echo "Run with:"
+              echo "  ./run.sh           # RV32 (default)"
+              echo "  ./run.sh rv64      # RV64"
+              echo "  ./run.sh --debug   # RV32 with debugger"
+              echo "  ./run.sh rv64 --debug  # RV64 with debugger"
             '';
           };
         }
@@ -91,80 +116,110 @@
           clang = "${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang";
           objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
-          cflags = "-std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fno-stack-protector -ffreestanding -nostdlib";
-          ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fno-stack-protector -ffreestanding -nostdlib";
 
-          # Build the shell application
-          shell =
-            pkgs.runCommand "build-shell"
-              {
-                nativeBuildInputs = with pkgs.llvmPackages_latest; [
-                  clang-unwrapped
-                  bintools-unwrapped
-                ];
-              }
-              ''
-                mkdir -p $out
-                # Copy source files
-                cp ${./shell.cc} shell.cc
-                cp ${./user.cc} user.cc
-                cp ${./user.h} user.h
-                cp ${./common.cc} common.cc
-                cp ${./common.h} common.h
-                cp ${./user.ld} user.ld
+          # Helper function to build for a specific architecture
+          mkKernel =
+            arch:
+            let
+              cfg = archConfigs.${arch};
+              cflags = "-std=c11 -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib";
+              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib";
 
-                # Build the shell
-                ${clang} ${ccflags} \
-                --ld-path=${lld} \
-                -Wl,-Tuser.ld \
-                -Wl,-Map=$out/shell.map \
-                -o $out/shell.elf \
-                user.cc common.cc shell.cc
+              # Build the shell application
+              shell =
+                pkgs.runCommand "build-shell-${arch}"
+                  {
+                    nativeBuildInputs = with pkgs.llvmPackages_latest; [
+                      clang-unwrapped
+                      bintools-unwrapped
+                    ];
+                  }
+                  ''
+                    mkdir -p $out
+                    # Copy source files
+                    cp ${./shell.cc} shell.cc
+                    cp ${./user.cc} user.cc
+                    cp ${./user.h} user.h
+                    cp ${./common.cc} common.cc
+                    cp ${./common.h} common.h
+                    cp ${./user.ld} user.ld
 
-                # Convert to binary
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                $out/shell.elf $out/shell.bin
+                    # Build the shell
+                    ${clang} ${ccflags} \
+                    --ld-path=${lld} \
+                    -Wl,-Tuser.ld \
+                    -Wl,-Map=$out/shell.map \
+                    -o $out/shell.elf \
+                    user.cc common.cc shell.cc
 
-                # Convert binary to ELF object with clean symbol names
-                # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
-                cd $out
-                ${objcopy} -I binary -O elf32-littleriscv \
-                shell.bin shell.bin.o
-              '';
+                    # Convert to binary
+                    ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+                    $out/shell.elf $out/shell.bin
+
+                    # Convert binary to ELF object with clean symbol names
+                    # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
+                    cd $out
+                    ${objcopy} -I binary -O ${cfg.elfFormat} \
+                    shell.bin shell.bin.o
+                  '';
+
+              # Build the kernel
+              kernel =
+                pkgs.runCommand "build-kernel-${arch}"
+                  {
+                    nativeBuildInputs = with pkgs.llvmPackages_latest; [
+                      clang-unwrapped
+                      bintools-unwrapped
+                    ];
+                  }
+                  ''
+                    mkdir -p $out
+                    # Copy source files
+                    cp ${./kernel.cc} kernel.cc
+                    cp ${./kernel.h} kernel.h
+                    cp ${./common.cc} common.cc
+                    cp ${./common.h} common.h
+                    cp ${./kernel.ld} kernel.ld
+
+                    # Copy the embedded shell object
+                    cp ${shell}/shell.bin.o shell.bin.o
+
+                    # Build kernel.elf with embedded shell
+                    ${clang} ${ccflags} \
+                    --ld-path=${lld} \
+                    -Wl,-Tkernel.ld \
+                    -Wl,-Map=$out/kernel.map \
+                    -o $out/kernel.elf \
+                    kernel.cc common.cc shell.bin.o
+                  '';
+
+            in
+            {
+              inherit shell kernel;
+              default = kernel;
+            };
+
+          # Build both architectures
+          build32 = mkKernel "riscv32";
+          build64 = mkKernel "riscv64";
+
         in
         {
-          # Shell application package
-          shell = shell;
+          # RV32 packages (short names)
+          rv32 = build32.kernel;
+          rv32-shell = build32.shell;
 
-          # Kernel package (default)
-          default =
-            pkgs.runCommand "build-kernel"
-              {
-                nativeBuildInputs = with pkgs.llvmPackages_latest; [
-                  clang-unwrapped
-                  bintools-unwrapped
-                ];
-              }
-              ''
-                mkdir -p $out
-                # Copy source files
-                cp ${./kernel.cc} kernel.cc
-                cp ${./kernel.h} kernel.h
-                cp ${./common.cc} common.cc
-                cp ${./common.h} common.h
-                cp ${./kernel.ld} kernel.ld
+          # RV64 packages (short names)
+          rv64 = build64.kernel;
+          rv64-shell = build64.shell;
 
-                # Copy the embedded shell object
-                cp ${shell}/shell.bin.o shell.bin.o
+          # Default to RV32
+          default = build32.kernel;
 
-                # Build kernel.elf with embedded shell
-                ${clang} ${ccflags} \
-                --ld-path=${lld} \
-                -Wl,-Tkernel.ld \
-                -Wl,-Map=$out/kernel.map \
-                -o $out/kernel.elf \
-                kernel.cc common.cc shell.bin.o
-              '';
+          # Legacy aliases for compatibility
+          shell = build32.shell;
+          riscv32 = build32.kernel;
+          riscv64 = build64.kernel;
         }
       );
     };

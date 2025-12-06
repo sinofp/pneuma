@@ -1,0 +1,88 @@
+#!/usr/bin/env zsh
+
+# Build and run RISC-V OS kernel with optional debugging support
+
+set -ue
+
+# Architecture selection (default: rv32)
+# Usage: ./run [rv32|rv64] [--debug]
+local arch=rv32
+local debug=false
+
+# Parse arguments
+while (( $# > 0 )) {
+    case $1 {
+        (rv32)
+            arch=rv32
+            shift
+            ;;
+        (rv64)
+            arch=rv64
+            shift
+            ;;
+        (--debug)
+            debug=true
+            shift
+            ;;
+        (*)
+            echo "Error: Unknown argument '$1'"
+            echo "Usage: $0 [rv32|rv64] [--debug]"
+            exit 1
+            ;;
+    }
+}
+
+# Architecture-specific configuration
+local qemu abi
+case $arch {
+    (rv32)
+        qemu=qemu-system-riscv32
+        abi=ilp32
+        ;;
+    (rv64)
+        qemu=qemu-system-riscv64
+        abi=lp64
+        ;;
+}
+
+echo "Building for ${arch:u}..."
+
+# OpenSBI firmware path
+local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
+
+# Build kernel for selected architecture
+nix build .#$arch -o result-$arch
+
+local kernel_elf=result-$arch/kernel.elf
+
+if [[ $debug == true ]] {
+    echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
+
+    # Get the compilation directory from debug info for source mapping
+    local comp_dir=$(llvm-dwarfdump $kernel_elf | grep DW_AT_comp_dir | head -1 | sed -E 's/.*"(.*)".*/\1/')
+
+    # Start QEMU in background with debugger support
+    $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
+          --no-reboot -kernel $kernel_elf -s -S &
+
+    local qemu_pid=$!
+
+    # Split wezterm pane and start LLDB in the new bottom pane
+    echo 'Splitting terminal and starting LLDB...'
+    echo "Source mapping: $comp_dir -> $PWD"
+    wezterm cli split-pane --bottom --percent 62 -- zsh -c "
+        lldb $kernel_elf \
+          -o 'settings set target.source-map "$comp_dir" "$PWD"' \
+          -o 'gdb-remote localhost:1234'
+    " >/dev/null # Ignores pane-id because it'll be closed when exiting LLDB
+
+    # Wait for QEMU to finish
+    wait $qemu_pid 2>/dev/null || true
+
+} else {
+    # Start QEMU normally
+    echo "Running ${arch:u} kernel..."
+    $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
+          --no-reboot -kernel $kernel_elf \
+          -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
+}
