@@ -3,22 +3,22 @@
 
 // The base virtual address of an application image. This needs to match the
 // starting address defined in `user.ld`.
-constexpr unsigned USER_BASE = 0x1000000;
+constexpr vaddr_t USER_BASE = 0x1000000;
 
-extern char __kernel_base[], __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
+extern uint8_t __kernel_base[], __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
 // shell.bin.o
-extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
+extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
 
-paddr_t alloc_pages(uint32_t n) {
-    static paddr_t next_paddr = (paddr_t) __free_ram;
-    paddr_t paddr = next_paddr;
+paddr_t alloc_pages(size_t n) {
+    static auto next_paddr = reinterpret_cast<paddr_t>(__free_ram);
+    auto paddr = next_paddr;
     next_paddr += n * PAGE_SIZE;
 
-    if (next_paddr > (paddr_t) __free_ram_end)
+    if (next_paddr > reinterpret_cast<paddr_t>(__free_ram_end))
         PANIC("out of memory");
 
-    memset((void *) paddr, 0, n * PAGE_SIZE);
+    memset(reinterpret_cast<void *>(paddr), 0, n * PAGE_SIZE);
     return paddr;
 }
 
@@ -225,51 +225,44 @@ struct process procs[PROCS_MAX]; // All process control structures.
 struct process *create_process(const void *image, size_t image_size) {
     // Find an unused process control structure.
     struct process *proc = nullptr;
-    int i;
-    for (i = 0; i < PROCS_MAX; i++) {
+    size_t i;
+    for (i = 0; i < PROCS_MAX; i++)
         if (procs[i].state == PROC_UNUSED) {
             proc = &procs[i];
             break;
         }
-    }
 
     if (!proc)
         PANIC("no free process slots");
 
     // Stack callee-saved registers. These register values will be restored in
     // the first context switch in switch_context.
-    uint32_t *sp = (uint32_t *) &proc->stack[sizeof(proc->stack)]; // the stack grows downward
-    sp -= 13;                                                      // Space for s11, s10, ... s0, and finally ra
-    *sp = (uint32_t) user_entry;
+    auto *sp = reinterpret_cast<xlen_t *>(&proc->stack[sizeof(proc->stack)]); // the stack grows downward
+    sp -= 13; // Space for s11, s10, ... s0, and finally ra. The number of registers of RV32 and RV64 are the same
+    *sp = reinterpret_cast<xlen_t>(user_entry); // TODO Or paddr_t? vaddr_t?
 
-    // Map kernel pages.
+    // Identical mapping for kernel pages, prepared for user's syscalls.
     // Map everything from __kernel_base to __free_ram_end.
     // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
     // dynamically allocated areas managed by alloc_pages
-    paddr_t *page_table = (paddr_t *) alloc_pages(1);
-    for (paddr_t paddr = (paddr_t) __kernel_base;
-         // for (paddr_t paddr = (paddr_t) __free_ram;
-         paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE)
-        map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+    auto *page_table = reinterpret_cast<paddr_t *>(alloc_pages(1));
+    for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < reinterpret_cast<vaddr_t>(__free_ram_end);
+         kaddr += PAGE_SIZE)
+        map_page(page_table, kaddr, kaddr, PAGE_R | PAGE_W | PAGE_X);
 
     // Map user pages.
-    for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
+    for (auto offset = 0uz; offset < image_size; offset += PAGE_SIZE) {
         paddr_t page = alloc_pages(1);
 
-        // Handle the case where the data to be copied is smaller than the
-        // page size.
-        size_t remaining = image_size - off;
-        size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
-
         // Fill and map the page.
-        memcpy((void *) page, static_cast<const uint8_t *>(image) + off, copy_size);
-        map_page(page_table, USER_BASE + off, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+        memcpy((void *) page, static_cast<const uint8_t *>(image) + offset, min(PAGE_SIZE, image_size - offset));
+        map_page(page_table, USER_BASE + offset, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
     // Initialize fields.
     proc->pid = i + 1;
     proc->state = PROC_RUNNABLE;
-    proc->sp = (uint32_t) sp;
+    proc->sp = reinterpret_cast<xlen_t>(sp);
     proc->page_table = page_table;
     return proc;
 }
@@ -280,7 +273,7 @@ struct process *idle_proc;    // Idle process
 void yield() {
     // Search for a runnable process
     struct process *next = idle_proc;
-    for (int i = 0; i < PROCS_MAX; i++) {
+    for (auto i = 0uz; i < PROCS_MAX; i++) {
         struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
         if (proc->state == PROC_RUNNABLE && proc->pid > 0) {
             next = proc;

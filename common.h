@@ -14,7 +14,7 @@ using vaddr_t = uintptr_t;
 using paddr_t = uintptr_t;
 
 // The same for both Sv32 and Sv39
-constexpr unsigned PAGE_SIZE = 4096;
+constexpr size_t PAGE_SIZE = 4096;
 
 #define align_up(value, align) __builtin_align_up(value, align)
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
@@ -22,6 +22,9 @@ constexpr unsigned PAGE_SIZE = 4096;
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
+
+// TODO concept?
+template <typename T> inline T min(T a, T b) { return a < b ? a : b; }
 
 extern "C" {
 
