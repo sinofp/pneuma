@@ -3,11 +3,7 @@
 
 // The base virtual address of an application image. This needs to match the
 // starting address defined in `user.ld`.
-#define USER_BASE 0x1000000
-
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef uint32_t size_t;
+constexpr unsigned USER_BASE = 0x1000000;
 
 extern char __kernel_base[], __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
@@ -28,10 +24,10 @@ paddr_t alloc_pages(uint32_t n) {
 
 void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     if (!is_aligned(vaddr, PAGE_SIZE))
-        PANIC("unaligned vaddr %x", vaddr);
+        PANIC("unaligned vaddr %p", reinterpret_cast<void *>(vaddr));
 
     if (!is_aligned(paddr, PAGE_SIZE))
-        PANIC("unaligned paddr %x", paddr);
+        PANIC("unaligned paddr 0x%lx", paddr);
 
     // TODO recurisive?
 
@@ -337,7 +333,7 @@ void handle_syscall(struct trap_frame *f) {
         yield();
         PANIC("unreachable");
     default:
-        PANIC("unexpected syscall a3=%x\n", f->a3);
+        PANIC("unexpected syscall a3=0x%x\n", f->a3);
     }
 }
 
@@ -351,7 +347,7 @@ extern "C" void handle_trap(struct trap_frame *f) {
         // Advance an instruction to skip the ecall
         user_pc += 4;
     } else {
-        PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval, user_pc);
+        PANIC("unexpected trap scause=0x%x, stval=0x%x, sepc=0x%x\n", scause, stval, user_pc);
     }
 
     WRITE_CSR(sepc, user_pc);
@@ -369,12 +365,13 @@ extern "C" void kernel_main() {
     puts(s);
 
     printf("\n\nhello %s\n", "world!");
-    printf("1 + 2 = %d, %x\n", 1 + 2, 0x1234abcd);
+    // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
+    printf("1 + 2 = %d, 0x%x, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
 
     paddr_t paddr0 = alloc_pages(2);
     paddr_t paddr1 = alloc_pages(1);
-    printf("alloc_pages test: paddr0=%x\n", paddr0);
-    printf("alloc_pages test: paddr1=%x\n", paddr1);
+    printf("alloc_pages test: paddr0=0x%x\n", paddr0);
+    printf("alloc_pages test: paddr1=0x%x\n", paddr1);
 
     idle_proc = create_process(nullptr, 0);
     idle_proc->pid = 0; // idle

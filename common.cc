@@ -33,28 +33,36 @@ int strcmp(const char *s1, const char *s2) {
     return *s1 - *s2;
 }
 
+namespace {
+template <typename T> void print_hex(T value) {
+    // If i is auto (size_t), --i will also be positive
+    for (int i = sizeof(T) * 2 - 1; i >= 0; --i) {
+        uint_fast8_t nibble = value >> (i * 4) & 0xf;
+        putchar("0123456789abcdef"[nibble]);
+    }
+}
+} // namespace
+
 void printf(const char *__restrict__ format, ...) {
     va_list vargs;
     va_start(vargs, format);
 
     while (*format) {
         if (*format == '%') {
-            ++format;          // Skip '%'
-            switch (*format) { // Read the next character
-            case '\0':         // '%' at the end of the format string
+            switch (*++format) { // Skip '%', read the next character
+            case '\0':           // '%' at the end of the format string
                 putchar('%');
                 goto end;
             case '%': // Print '%'
                 putchar('%');
                 break;
-            case 's': { // Print a NUL-terminated string.
-                const char *s = va_arg(vargs, const char *);
-                puts(s);
+            case 's':
+                puts(va_arg(vargs, const char *));
                 break;
-            }
-            case 'd': { // Print an integer in decimal.
-                int value = va_arg(vargs, int);
-                unsigned magnitude = value; // https://github.com/nuta/operating-system-in-1000-lines/issues/64
+            case 'd': {
+                auto value = va_arg(vargs, int);
+                // https://github.com/nuta/operating-system-in-1000-lines/issues/64
+                unsigned magnitude = value;
                 if (value < 0) {
                     putchar('-');
                     magnitude = -magnitude;
@@ -64,27 +72,37 @@ void printf(const char *__restrict__ format, ...) {
                 while (magnitude / divisor > 9)
                     divisor *= 10;
 
-                while (divisor > 0) {
+                while (divisor) {
                     putchar('0' + magnitude / divisor);
                     magnitude %= divisor;
                     divisor /= 10;
                 }
-
                 break;
             }
-            case 'x': { // Print an integer in hexadecimal.
-                auto value = va_arg(vargs, unsigned);
-                for (int i = 7; i >= 0; i--) {
-                    uint8_t nibble = (value >> (i * 4)) & 0xf; // Actually only 4-bit
-                    putchar("0123456789abcdef"[nibble]);
+            case 'x':
+                print_hex(va_arg(vargs, unsigned));
+                break;
+            case 'l': {
+                switch (*++format) {
+                case 'x':
+                    print_hex(va_arg(vargs, unsigned long));
+                    break;
+                default:
                 }
+                break;
             }
+            case 'p':
+                puts("0x");
+                // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict, and
+                // use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
+                print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
+                break;
+            default:
             }
-        } else {
+        } else
             putchar(*format);
-        }
 
-        format++;
+        ++format;
     }
 
 end:
