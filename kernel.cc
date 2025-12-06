@@ -48,8 +48,9 @@ void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     table0[vpn0] = pte;
 }
 
-__attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
+__attribute__((naked)) __attribute__((aligned(4))) void kernel_entry() {
     __asm__ __volatile__(
+        // clang-format off
         // We must not trust the stack pointer at the time of exception.
         // Retrieve the kernel stack of the running process from sscratch.
         "csrrw sp, sscratch, sp\n"
@@ -57,81 +58,99 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry(void) {
         // sp now points to the kernel (not user) stack of the currently running process.
         // sscratch now holds the original value of sp (user stack) at the time of the exception
 
-        "addi sp, sp, -4 * 31\n"
-        "sw ra,  4 * 0(sp)\n"
-        "sw gp,  4 * 1(sp)\n"
-        "sw tp,  4 * 2(sp)\n"
-        "sw t0,  4 * 3(sp)\n"
-        "sw t1,  4 * 4(sp)\n"
-        "sw t2,  4 * 5(sp)\n"
-        "sw t3,  4 * 6(sp)\n"
-        "sw t4,  4 * 7(sp)\n"
-        "sw t5,  4 * 8(sp)\n"
-        "sw t6,  4 * 9(sp)\n"
-        "sw a0,  4 * 10(sp)\n"
-        "sw a1,  4 * 11(sp)\n"
-        "sw a2,  4 * 12(sp)\n"
-        "sw a3,  4 * 13(sp)\n"
-        "sw a4,  4 * 14(sp)\n"
-        "sw a5,  4 * 15(sp)\n"
-        "sw a6,  4 * 16(sp)\n"
-        "sw a7,  4 * 17(sp)\n"
-        "sw s0,  4 * 18(sp)\n"
-        "sw s1,  4 * 19(sp)\n"
-        "sw s2,  4 * 20(sp)\n"
-        "sw s3,  4 * 21(sp)\n"
-        "sw s4,  4 * 22(sp)\n"
-        "sw s5,  4 * 23(sp)\n"
-        "sw s6,  4 * 24(sp)\n"
-        "sw s7,  4 * 25(sp)\n"
-        "sw s8,  4 * 26(sp)\n"
-        "sw s9,  4 * 27(sp)\n"
-        "sw s10, 4 * 28(sp)\n"
-        "sw s11, 4 * 29(sp)\n"
+        "addi sp, sp, -%[size]\n"
+        STORE " ra,  %[ra_offset](sp)\n"
+        STORE " gp,  %[gp_offset](sp)\n"
+        STORE " tp,  %[tp_offset](sp)\n"
+        STORE " t0,  %[t0_offset](sp)\n"
+        STORE " t1,  %[t1_offset](sp)\n"
+        STORE " t2,  %[t2_offset](sp)\n"
+        STORE " t3,  %[t3_offset](sp)\n"
+        STORE " t4,  %[t4_offset](sp)\n"
+        STORE " t5,  %[t5_offset](sp)\n"
+        STORE " t6,  %[t6_offset](sp)\n"
+        STORE " a0,  %[a0_offset](sp)\n"
+        STORE " a1,  %[a1_offset](sp)\n"
+        STORE " a2,  %[a2_offset](sp)\n"
+        STORE " a3,  %[a3_offset](sp)\n"
+        STORE " a4,  %[a4_offset](sp)\n"
+        STORE " a5,  %[a5_offset](sp)\n"
+        STORE " a6,  %[a6_offset](sp)\n"
+        STORE " a7,  %[a7_offset](sp)\n"
+        STORE " s0,  %[s0_offset](sp)\n"
+        STORE " s1,  %[s1_offset](sp)\n"
+        STORE " s2,  %[s2_offset](sp)\n"
+        STORE " s3,  %[s3_offset](sp)\n"
+        STORE " s4,  %[s4_offset](sp)\n"
+        STORE " s5,  %[s5_offset](sp)\n"
+        STORE " s6,  %[s6_offset](sp)\n"
+        STORE " s7,  %[s7_offset](sp)\n"
+        STORE " s8,  %[s8_offset](sp)\n"
+        STORE " s9,  %[s9_offset](sp)\n"
+        STORE " s10, %[s10_offset](sp)\n"
+        STORE " s11, %[s11_offset](sp)\n"
 
         // Retrieve and save the sp at the time of exception.
         "csrr a0, sscratch\n"
-        "sw a0, 4 * 30(sp)\n"
+        STORE " a0, %[sp_offset](sp)\n"
 
         // Reset the kernel stack.
-        "addi a0, sp, 4 * 31\n"
+        "addi a0, sp, %[size]\n"
         "csrw sscratch, a0\n"
 
         "mv a0, sp\n"
         "call handle_trap\n"
 
-        "lw ra,  4 * 0(sp)\n"
-        "lw gp,  4 * 1(sp)\n"
-        "lw tp,  4 * 2(sp)\n"
-        "lw t0,  4 * 3(sp)\n"
-        "lw t1,  4 * 4(sp)\n"
-        "lw t2,  4 * 5(sp)\n"
-        "lw t3,  4 * 6(sp)\n"
-        "lw t4,  4 * 7(sp)\n"
-        "lw t5,  4 * 8(sp)\n"
-        "lw t6,  4 * 9(sp)\n"
-        "lw a0,  4 * 10(sp)\n"
-        "lw a1,  4 * 11(sp)\n"
-        "lw a2,  4 * 12(sp)\n"
-        "lw a3,  4 * 13(sp)\n"
-        "lw a4,  4 * 14(sp)\n"
-        "lw a5,  4 * 15(sp)\n"
-        "lw a6,  4 * 16(sp)\n"
-        "lw a7,  4 * 17(sp)\n"
-        "lw s0,  4 * 18(sp)\n"
-        "lw s1,  4 * 19(sp)\n"
-        "lw s2,  4 * 20(sp)\n"
-        "lw s3,  4 * 21(sp)\n"
-        "lw s4,  4 * 22(sp)\n"
-        "lw s5,  4 * 23(sp)\n"
-        "lw s6,  4 * 24(sp)\n"
-        "lw s7,  4 * 25(sp)\n"
-        "lw s8,  4 * 26(sp)\n"
-        "lw s9,  4 * 27(sp)\n"
-        "lw s10, 4 * 28(sp)\n"
-        "lw s11, 4 * 29(sp)\n"
-        "lw sp,  4 * 30(sp)\n"
-        "sret\n");
+        LOAD " ra,  %[ra_offset](sp)\n"
+        LOAD " gp,  %[gp_offset](sp)\n"
+        LOAD " tp,  %[tp_offset](sp)\n"
+        LOAD " t0,  %[t0_offset](sp)\n"
+        LOAD " t1,  %[t1_offset](sp)\n"
+        LOAD " t2,  %[t2_offset](sp)\n"
+        LOAD " t3,  %[t3_offset](sp)\n"
+        LOAD " t4,  %[t4_offset](sp)\n"
+        LOAD " t5,  %[t5_offset](sp)\n"
+        LOAD " t6,  %[t6_offset](sp)\n"
+        LOAD " a0,  %[a0_offset](sp)\n"
+        LOAD " a1,  %[a1_offset](sp)\n"
+        LOAD " a2,  %[a2_offset](sp)\n"
+        LOAD " a3,  %[a3_offset](sp)\n"
+        LOAD " a4,  %[a4_offset](sp)\n"
+        LOAD " a5,  %[a5_offset](sp)\n"
+        LOAD " a6,  %[a6_offset](sp)\n"
+        LOAD " a7,  %[a7_offset](sp)\n"
+        LOAD " s0,  %[s0_offset](sp)\n"
+        LOAD " s1,  %[s1_offset](sp)\n"
+        LOAD " s2,  %[s2_offset](sp)\n"
+        LOAD " s3,  %[s3_offset](sp)\n"
+        LOAD " s4,  %[s4_offset](sp)\n"
+        LOAD " s5,  %[s5_offset](sp)\n"
+        LOAD " s6,  %[s6_offset](sp)\n"
+        LOAD " s7,  %[s7_offset](sp)\n"
+        LOAD " s8,  %[s8_offset](sp)\n"
+        LOAD " s9,  %[s9_offset](sp)\n"
+        LOAD " s10, %[s10_offset](sp)\n"
+        LOAD " s11, %[s11_offset](sp)\n"
+        LOAD " sp,  %[sp_offset](sp)\n"
+        "sret\n"
+        // clang-format on
+        :
+        : [size] "i"(static_cast<xlen_t>(sizeof(trap_frame))), [ra_offset] "i"(offsetof(trap_frame, ra)),
+          [gp_offset] "i"(offsetof(trap_frame, gp)), [tp_offset] "i"(offsetof(trap_frame, tp)),
+          [t0_offset] "i"(offsetof(trap_frame, t0)), [t1_offset] "i"(offsetof(trap_frame, t1)),
+          [t2_offset] "i"(offsetof(trap_frame, t2)), [t3_offset] "i"(offsetof(trap_frame, t3)),
+          [t4_offset] "i"(offsetof(trap_frame, t4)), [t5_offset] "i"(offsetof(trap_frame, t5)),
+          [t6_offset] "i"(offsetof(trap_frame, t6)), [a0_offset] "i"(offsetof(trap_frame, a0)),
+          [a1_offset] "i"(offsetof(trap_frame, a1)), [a2_offset] "i"(offsetof(trap_frame, a2)),
+          [a3_offset] "i"(offsetof(trap_frame, a3)), [a4_offset] "i"(offsetof(trap_frame, a4)),
+          [a5_offset] "i"(offsetof(trap_frame, a5)), [a6_offset] "i"(offsetof(trap_frame, a6)),
+          [a7_offset] "i"(offsetof(trap_frame, a7)), [s0_offset] "i"(offsetof(trap_frame, s0)),
+          [s1_offset] "i"(offsetof(trap_frame, s1)), [s2_offset] "i"(offsetof(trap_frame, s2)),
+          [s3_offset] "i"(offsetof(trap_frame, s3)), [s4_offset] "i"(offsetof(trap_frame, s4)),
+          [s5_offset] "i"(offsetof(trap_frame, s5)), [s6_offset] "i"(offsetof(trap_frame, s6)),
+          [s7_offset] "i"(offsetof(trap_frame, s7)), [s8_offset] "i"(offsetof(trap_frame, s8)),
+          [s9_offset] "i"(offsetof(trap_frame, s9)), [s10_offset] "i"(offsetof(trap_frame, s10)),
+          [s11_offset] "i"(offsetof(trap_frame, s11)), [sp_offset] "i"(offsetof(trap_frame, sp)));
 }
 
 struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long fid, long eid) {
@@ -170,14 +189,6 @@ long getchar() {
     struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
     return ret.error;
 }
-
-#if __riscv_xlen == 32
-#define STORE "sw"
-#define LOAD "lw"
-#else
-#define STORE "sd"
-#define LOAD "ld"
-#endif
 
 // No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.
 // I use template here because I wasn't sure what's the best type for process::sp: xlen_t, xlen_t *, vaddr_t, or vaddr_t
@@ -223,7 +234,7 @@ template <typename T> __attribute__((naked)) void switch_context(T *prev_sp, T n
         "ret\n"
         // clang-format on
         :
-        : [size] "i"(sizeof(callee_saved_regs)), [ra_offset] "i"(offsetof(callee_saved_regs, ra)),
+        : [size] "i"(static_cast<xlen_t>(sizeof(callee_saved_regs))), [ra_offset] "i"(offsetof(callee_saved_regs, ra)),
           [s0_offset] "i"(offsetof(callee_saved_regs, s0)), [s1_offset] "i"(offsetof(callee_saved_regs, s1)),
           [s2_offset] "i"(offsetof(callee_saved_regs, s2)), [s3_offset] "i"(offsetof(callee_saved_regs, s3)),
           [s4_offset] "i"(offsetof(callee_saved_regs, s4)), [s5_offset] "i"(offsetof(callee_saved_regs, s5)),
