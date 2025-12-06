@@ -171,44 +171,65 @@ long getchar() {
     return ret.error;
 }
 
-__attribute__((naked)) void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
+#if __riscv_xlen == 32
+#define STORE "sw"
+#define LOAD "lw"
+#else
+#define STORE "sd"
+#define LOAD "ld"
+#endif
+
+// No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.
+// I use template here because I wasn't sure what's the best type for process::sp: xlen_t, xlen_t *, vaddr_t, or vaddr_t
+// *?
+template <typename T> __attribute__((naked)) void switch_context(T *prev_sp, T next_sp) {
     __asm__ __volatile__(
+        // clang-format off
         // Save callee-saved registers onto the current process's stack.
-        "addi sp, sp, -13 * 4\n" // Allocate stack space for 13 4-byte registers
-        "sw ra,  0  * 4(sp)\n"   // Save callee-saved registers only
-        "sw s0,  1  * 4(sp)\n"
-        "sw s1,  2  * 4(sp)\n"
-        "sw s2,  3  * 4(sp)\n"
-        "sw s3,  4  * 4(sp)\n"
-        "sw s4,  5  * 4(sp)\n"
-        "sw s5,  6  * 4(sp)\n"
-        "sw s6,  7  * 4(sp)\n"
-        "sw s7,  8  * 4(sp)\n"
-        "sw s8,  9  * 4(sp)\n"
-        "sw s9,  10 * 4(sp)\n"
-        "sw s10, 11 * 4(sp)\n"
-        "sw s11, 12 * 4(sp)\n"
+        "addi sp, sp, -%[size]\n"
+        STORE " ra,  %[ra_offset](sp)\n"
+        STORE " s0,  %[s0_offset](sp)\n"
+        STORE " s1,  %[s1_offset](sp)\n"
+        STORE " s2,  %[s2_offset](sp)\n"
+        STORE " s3,  %[s3_offset](sp)\n"
+        STORE " s4,  %[s4_offset](sp)\n"
+        STORE " s5,  %[s5_offset](sp)\n"
+        STORE " s6,  %[s6_offset](sp)\n"
+        STORE " s7,  %[s7_offset](sp)\n"
+        STORE " s8,  %[s8_offset](sp)\n"
+        STORE " s9,  %[s9_offset](sp)\n"
+        STORE " s10, %[s10_offset](sp)\n"
+        STORE " s11, %[s11_offset](sp)\n"
 
         // Switch the stack pointer.
-        "sw sp, (a0)\n" // *prev_sp = sp;
-        "lw sp, (a1)\n" // Switch stack pointer (sp) here
+        STORE " sp, (a0)\n" // *prev_sp = sp;
+        "mv sp, a1\n"       // Switch stack pointer (sp) here
 
         // Restore callee-saved registers from the next process's stack.
-        "lw ra,  0  * 4(sp)\n" // Restore callee-saved registers only
-        "lw s0,  1  * 4(sp)\n"
-        "lw s1,  2  * 4(sp)\n"
-        "lw s2,  3  * 4(sp)\n"
-        "lw s3,  4  * 4(sp)\n"
-        "lw s4,  5  * 4(sp)\n"
-        "lw s5,  6  * 4(sp)\n"
-        "lw s6,  7  * 4(sp)\n"
-        "lw s7,  8  * 4(sp)\n"
-        "lw s8,  9  * 4(sp)\n"
-        "lw s9,  10 * 4(sp)\n"
-        "lw s10, 11 * 4(sp)\n"
-        "lw s11, 12 * 4(sp)\n"
-        "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the stack
-        "ret\n");
+        LOAD " ra,  %[ra_offset](sp)\n"
+        LOAD " s0,  %[s0_offset](sp)\n"
+        LOAD " s1,  %[s1_offset](sp)\n"
+        LOAD " s2,  %[s2_offset](sp)\n"
+        LOAD " s3,  %[s3_offset](sp)\n"
+        LOAD " s4,  %[s4_offset](sp)\n"
+        LOAD " s5,  %[s5_offset](sp)\n"
+        LOAD " s6,  %[s6_offset](sp)\n"
+        LOAD " s7,  %[s7_offset](sp)\n"
+        LOAD " s8,  %[s8_offset](sp)\n"
+        LOAD " s9,  %[s9_offset](sp)\n"
+        LOAD " s10, %[s10_offset](sp)\n"
+        LOAD " s11, %[s11_offset](sp)\n"
+        "addi sp, sp, %[size]\n" // Pop restored registers from stack
+        "ret\n"
+        // clang-format on
+        :
+        : [size] "i"(sizeof(callee_saved_regs)), [ra_offset] "i"(offsetof(callee_saved_regs, ra)),
+          [s0_offset] "i"(offsetof(callee_saved_regs, s0)), [s1_offset] "i"(offsetof(callee_saved_regs, s1)),
+          [s2_offset] "i"(offsetof(callee_saved_regs, s2)), [s3_offset] "i"(offsetof(callee_saved_regs, s3)),
+          [s4_offset] "i"(offsetof(callee_saved_regs, s4)), [s5_offset] "i"(offsetof(callee_saved_regs, s5)),
+          [s6_offset] "i"(offsetof(callee_saved_regs, s6)), [s7_offset] "i"(offsetof(callee_saved_regs, s7)),
+          [s8_offset] "i"(offsetof(callee_saved_regs, s8)), [s9_offset] "i"(offsetof(callee_saved_regs, s9)),
+          [s10_offset] "i"(offsetof(callee_saved_regs, s10)), [s11_offset] "i"(offsetof(callee_saved_regs, s11)));
 }
 
 // ↓ __attribute__((naked)) is very important!
@@ -237,9 +258,11 @@ struct process *create_process(const void *image, size_t image_size) {
 
     // Stack callee-saved registers. These register values will be restored in
     // the first context switch in switch_context.
-    auto *sp = reinterpret_cast<xlen_t *>(&proc->stack[sizeof(proc->stack)]); // the stack grows downward
-    sp -= 13; // Space for s11, s10, ... s0, and finally ra. The number of registers of RV32 and RV64 are the same
-    *sp = reinterpret_cast<xlen_t>(user_entry); // TODO Or paddr_t? vaddr_t?
+    auto *sp = reinterpret_cast<decltype(proc->sp)>(&proc->stack[sizeof(proc->stack)]); // the stack grows downward
+    // Make space for callee_saved_regs. The number of registers of RV32 and RV64 are the same
+    constexpr size_t stack_length = sizeof(callee_saved_regs) / sizeof(xlen_t);
+    sp -= stack_length;                         // The same as sp -= 13;
+    *sp = reinterpret_cast<xlen_t>(user_entry); // std::remove_pointer?
 
     // Identical mapping for kernel pages, prepared for user's syscalls.
     // Map everything from __kernel_base to __free_ram_end.
@@ -260,9 +283,10 @@ struct process *create_process(const void *image, size_t image_size) {
     }
 
     // Initialize fields.
+    // TODO C++ construct and swap?
     proc->pid = i + 1;
+    proc->sp = sp;
     proc->state = PROC_RUNNABLE;
-    proc->sp = reinterpret_cast<xlen_t>(sp);
     proc->page_table = page_table;
     return proc;
 }
@@ -301,7 +325,7 @@ void yield() {
     // Context switch
     struct process *prev = current_proc;
     current_proc = next;
-    switch_context(&prev->sp, &next->sp);
+    switch_context(&prev->sp, next->sp);
 }
 
 void handle_syscall(struct trap_frame *f) {

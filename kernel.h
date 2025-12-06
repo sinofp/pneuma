@@ -20,6 +20,22 @@ struct sbiret {
 // I choose unsigned long because of its usage in OpenSBI interfaces
 using xlen_t = unsigned long;
 
+struct callee_saved_regs {
+    xlen_t ra;
+    xlen_t s0;
+    xlen_t s1;
+    xlen_t s2;
+    xlen_t s3;
+    xlen_t s4;
+    xlen_t s5;
+    xlen_t s6;
+    xlen_t s7;
+    xlen_t s8;
+    xlen_t s9;
+    xlen_t s10;
+    xlen_t s11;
+} __attribute__((packed));
+
 struct trap_frame {
     xlen_t ra;
     xlen_t gp;
@@ -74,9 +90,10 @@ constexpr unsigned PROC_RUNNABLE = 1; // Runnable process
 constexpr unsigned PROC_EXITED = 2;
 
 struct process {
-    size_t pid;          // Process ID
-    int state;           // Process state: PROC_UNUSED or PROC_RUNNABLE
-    vaddr_t sp;          // Stack pointer
+    size_t pid; // Process ID
+    int state;  // Process state: PROC_UNUSED or PROC_RUNNABLE
+    xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
+                // be a vaddr_t *.
     uint8_t stack[8192]; // Kernel stack
     paddr_t *page_table;
 };
