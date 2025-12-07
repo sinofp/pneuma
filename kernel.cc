@@ -22,7 +22,11 @@ paddr_t alloc_pages(size_t n) {
     return paddr;
 }
 
+#if __riscv_xlen == 32
 void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+#else
+void map_page(paddr_t *table2, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+#endif
     if (!is_aligned(vaddr, PAGE_SIZE))
         PANIC("unaligned vaddr %p", reinterpret_cast<void *>(vaddr));
 
@@ -31,21 +35,54 @@ void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
 
     // TODO recurisive?
 
-    uint32_t vpn1 = vaddr >> 22;
-    uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
-    uint32_t pte = table1[vpn1];
+#if __riscv_xlen == 32
+    // Every VPN in Sv32 is 10-bit
+    const xlen_t vpn1 = vaddr >> 22;           // [31:22]
+    const xlen_t vpn0 = (vaddr >> 12) & 0x3ff; // [21:12]
+
+    xlen_t pte = table1[vpn1];
     if (!(pte & PAGE_V)) {
         // Create the first level page if it doesn't exist
-        paddr_t pt_paddr = alloc_pages(1);
-        uint32_t ppn = pt_paddr / PAGE_SIZE;
+        auto pt_paddr = alloc_pages(1);
+        xlen_t ppn = pt_paddr / PAGE_SIZE;
         table1[vpn1] = pte = ppn << 10 | PAGE_V;
     }
 
-    uint32_t ppn = pte >> 10;
-    paddr_t *table0 = (uint32_t *) (ppn * PAGE_SIZE);
+    xlen_t ppn = pte >> 10;
+    auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
     ppn = paddr / PAGE_SIZE; // == >> 12, why waste the last two bits of PTE?
     pte = ppn << 10 | flags | PAGE_V;
     table0[vpn0] = pte;
+#else
+    // Every VPN in Sv39 is 9-bit
+    const xlen_t vpn2 = (vaddr >> 30) & 0x1ff; // Ignore sign extension [63:39], keep [38:30]
+    const xlen_t vpn1 = (vaddr >> 21) & 0x1ff; // [29:21]
+    const xlen_t vpn0 = (vaddr >> 12) & 0x1ff; // [20:12]
+
+    xlen_t pte = table2[vpn2];
+    if (!(pte & PAGE_V)) {
+        // Create the second level page if it doesn't exist
+        auto pt_paddr = alloc_pages(1);
+        xlen_t ppn = pt_paddr / PAGE_SIZE;
+        table2[vpn2] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
+    }
+
+    xlen_t ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
+    auto *const table1 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
+    pte = table1[vpn1];
+    if (!(pte & PAGE_V)) {
+        // Create the first level page if it doesn't exist
+        auto pt_paddr = alloc_pages(1);
+        xlen_t ppn = pt_paddr / PAGE_SIZE;
+        table1[vpn1] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
+    }
+
+    ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
+    auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
+    ppn = paddr / PAGE_SIZE;
+    pte = ppn << 10 | flags | PAGE_V;
+    table0[vpn0] = pte;
+#endif
 }
 
 __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry() {
@@ -325,6 +362,14 @@ void yield() {
     if (next == current_proc)
         return;
 
+    xlen_t satp = reinterpret_cast<xlen_t>(next->page_table) / PAGE_SIZE;
+    if constexpr (__riscv_xlen == 32)
+        satp |= SATP_SV32;
+    else
+        satp |= SATP_SV39;
+
+    auto kernel_stack = reinterpret_cast<xlen_t>(&next->stack[sizeof(next->stack)]);
+
     __asm__ __volatile__(
         // Switch page table
         "sfence.vma\n"
@@ -334,9 +379,7 @@ void yield() {
         // Save the kernel stack for the currently executing process for exception handling
         "csrw sscratch, %[sscratch]\n"
         :
-        : [satp] "r"(SATP_SV32 | ((uint32_t) next->page_table / PAGE_SIZE)), [sscratch] "r"(
-                                                                                 (uint32_t) &next->stack[sizeof(
-                                                                                     next->stack)]));
+        : [satp] "r"(satp), [sscratch] "r"(kernel_stack));
 
     // Context switch
     struct process *prev = current_proc;

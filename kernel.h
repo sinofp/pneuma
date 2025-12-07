@@ -110,7 +110,8 @@ struct process {
     paddr_t *page_table;
 };
 
-constexpr unsigned SATP_SV32 = 1u << 31;
+constexpr xlen_t SATP_SV32 = 1u << 31;
+constexpr xlen_t SATP_SV39 = 8ull << 60;
 constexpr unsigned PAGE_V = 1 << 0; // "Valid" bit (entry is enabled)
 constexpr unsigned PAGE_R = 1 << 1; // Readable
 constexpr unsigned PAGE_W = 1 << 2; // Writable
