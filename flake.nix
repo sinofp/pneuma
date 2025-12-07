@@ -46,6 +46,39 @@
             tar xf ${opensbi-fw} -C $out/share/opensbi --strip-components=1
           '';
 
+          # Create a clang with --target wrapper for U-Boot
+          clangRiscv = pkgs.writeShellScriptBin "clang-riscv64" ''
+            exec ${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang --target=riscv64-unknown-elf "$@"
+          '';
+
+          inherit (pkgs.callPackage "${nixpkgs}/pkgs/misc/uboot" { }) buildUBoot;
+
+          uboot = (
+            defconfig:
+            buildUBoot {
+              inherit defconfig;
+              extraMeta.platforms = [ system ];
+              OPENSBI = "${opensbi}/share/opensbi/lp64/generic/firmware/fw_dynamic.bin";
+              filesToInstall = [ "u-boot.bin" ];
+              extraMakeFlags = [
+                "LLVM=1"
+                "LLVM_IAS=1"
+                "CC=${clangRiscv}/bin/clang-riscv64"
+                "LD=${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
+                "OBJCOPY=${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy"
+                "AR=${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-ar"
+              ];
+              # Disable EFI loader and self-tests which have host architecture detection issues
+              extraConfig = ''
+                # CONFIG_EFI_LOADER is not set
+                # CONFIG_CMD_BOOTEFI is not set
+              '';
+            }
+          );
+
+          # TODO starfive_visionfive2_defconfig
+          ubootQemu = uboot "qemu-riscv64_smode_defconfig";
+
         in
         {
           default = pkgs.mkShell {
@@ -53,8 +86,8 @@
               # Unwrapped LLVM/clang for bare-metal RISC-V development
               llvmPackages_latest.clang-unwrapped
               llvmPackages_latest.bintools-unwrapped # includes lld, llvm-nm, llvm-objdump, etc.
-              # OpenSBI firmware for RISC-V (pre-built)
               opensbi
+              ubootQemu
               (qemu.override {
                 hostCpuTargets = [
                   "riscv64-softmmu"
@@ -86,23 +119,15 @@
 
             shellHook = ''
               export QEMU_OPENSBI="${opensbi}/share/opensbi"
+              export UBOOT_QEMU="${ubootQemu}/u-boot.bin"
               export CLANG="${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang"
               export LLD="${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
-              export PATH="$PWD:$PATH" # run
+              export PATH="$PWD:$PATH" # run, fmt
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"
               echo "LLD: $LLD"
               echo "OpenSBI firmware: $QEMU_OPENSBI"
-              echo ""
-              echo "Build targets:"
-              echo "  nix build .#rv32        # RV32 kernel (with embedded shell)"
-              echo "  nix build .#rv64        # RV64 kernel (with embedded shell)"
-              echo ""
-              echo "Run with:"
-              echo "  run           # RV32 (default)"
-              echo "  run rv64      # RV64"
-              echo "  run --debug   # RV32 with debugger"
-              echo "  run rv64 --debug  # RV64 with debugger"
+              echo "U-Boot (QEMU): $UBOOT_QEMU"
             '';
           };
         }

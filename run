@@ -5,9 +5,10 @@
 set -ue
 
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64] [--debug]
+# Usage: ./run [rv32|rv64] [--debug] [--uboot]
 local arch=rv32
 local debug=false
+local use_uboot=false
 
 # Parse arguments
 while (( $# > 0 )) {
@@ -24,9 +25,13 @@ while (( $# > 0 )) {
             debug=true
             shift
             ;;
+        (--uboot)
+            use_uboot=true
+            shift
+            ;;
         (*)
             echo "Error: Unknown argument '$1'"
-            echo "Usage: $0 [rv32|rv64] [--debug]"
+            echo "Usage: $0 [rv32|rv64] [--debug] [--uboot]"
             exit 1
             ;;
     }
@@ -56,6 +61,28 @@ nix build .#$arch -o result-$arch
 local kernel_elf=result-$arch/kernel.elf
 local shell_elf=result-$arch/shell.elf
 
+# U-Boot is only available for RV64
+if [[ $use_uboot == true && $arch != rv64 ]] {
+    echo "Error: U-Boot boot is only supported for rv64"
+    exit 1
+}
+
+# Check if U-Boot binary exists
+if [[ $use_uboot == true && ! -f $UBOOT_QEMU ]] {
+    echo "Error: U-Boot binary not found at $UBOOT_QEMU"
+    echo "Make sure you're running inside 'nix develop'"
+    exit 1
+}
+
+# Prepare boot configuration
+local qemu_kernel
+if [[ $use_uboot == true ]] {
+    echo "Boot chain: OpenSBI (M-mode) → U-Boot (S-mode) → Kernel (S-mode)"
+    qemu_kernel=$UBOOT_QEMU
+} else {
+    qemu_kernel=$kernel_elf
+}
+
 if [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
@@ -64,7 +91,7 @@ if [[ $debug == true ]] {
 
     # Start QEMU in background with debugger support
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
-          --no-reboot -kernel $kernel_elf -s -S &
+          --no-reboot -kernel $qemu_kernel -s -S &
 
     local qemu_pid=$!
 
@@ -83,8 +110,12 @@ if [[ $debug == true ]] {
 
 } else {
     # Start QEMU normally
-    echo "Running ${arch:u} kernel..."
+    if [[ $use_uboot == true ]] {
+        echo "Running ${arch:u} via U-Boot..."
+    } else {
+        echo "Running ${arch:u} kernel..."
+    }
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
-          --no-reboot -kernel $kernel_elf \
+          --no-reboot -kernel $qemu_kernel \
           -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
 }
