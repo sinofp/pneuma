@@ -54,14 +54,13 @@ local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bi
 nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
-local shell_elf=result-riscv$arch[-2,-1]-shell/shell.elf
+local shell_elf=result-$arch/shell.elf
 
 if [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
     # Get the compilation directory from debug info for source mapping
     local kernel_comp_dir=$(llvm-dwarfdump $kernel_elf | grep DW_AT_comp_dir | head -1 | sed -E 's|.*"(.*)".*|\1|')
-    local shell_comp_dir=$(llvm-dwarfdump $shell_elf | grep DW_AT_comp_dir | head -1 | sed -E 's|.*"(.*)".*|\1|')
 
     # Start QEMU in background with debugger support
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
@@ -72,12 +71,10 @@ if [[ $debug == true ]] {
     # Split wezterm pane and start LLDB in the new bottom pane
     echo 'Splitting terminal and starting LLDB...'
     echo "Source mapping: $kernel_comp_dir -> $PWD"
-    echo "                $shell_comp_dir -> $PWD"
     wezterm cli split-pane --bottom --percent 62 -- zsh -c "
         lldb $kernel_elf \
           -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
-          -o 'settings set target.source-map $shell_comp_dir "$PWD"' \
-	  -o 'image add $shell_elf' \
+          -o 'image add $shell_elf' \
           -o 'gdb-remote localhost:1234'
     " >/dev/null # Ignores pane-id because it'll be closed when exiting LLDB
 
