@@ -121,7 +121,9 @@
             arch:
             let
               cfg = archConfigs.${arch};
-              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib";
+              # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
+              pie = if arch == "riscv64" then "-fPIE" else "";
+              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
