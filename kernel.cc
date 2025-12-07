@@ -85,8 +85,9 @@ void map_page(paddr_t *table2, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
 #endif
 }
 
-__attribute__((naked)) __attribute__((aligned(4))) void kernel_entry() {
-    __asm__ __volatile__(
+[[using gnu: naked, aligned(4)]]
+void kernel_entry() {
+    asm volatile(
         // clang-format off
         // We must not trust the stack pointer at the time of exception.
         // Retrieve the kernel stack of the running process from sscratch.
@@ -193,19 +194,19 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry() {
 // Many function arguments in SBI spec are defined as unsigned long.
 // I prefer xlen_t for clarity, although they're the same.
 sbiret sbi_call(xlen_t arg0, xlen_t arg1, xlen_t arg2, xlen_t arg3, xlen_t arg4, xlen_t arg5, xlen_t fid, xlen_t eid) {
-    register xlen_t a0 __asm__("a0") = arg0;
-    register xlen_t a1 __asm__("a1") = arg1;
-    register xlen_t a2 __asm__("a2") = arg2;
-    register xlen_t a3 __asm__("a3") = arg3;
-    register xlen_t a4 __asm__("a4") = arg4;
-    register xlen_t a5 __asm__("a5") = arg5;
-    register xlen_t a6 __asm__("a6") = fid;
-    register xlen_t a7 __asm__("a7") = eid;
+    register xlen_t a0 asm("a0") = arg0;
+    register xlen_t a1 asm("a1") = arg1;
+    register xlen_t a2 asm("a2") = arg2;
+    register xlen_t a3 asm("a3") = arg3;
+    register xlen_t a4 asm("a4") = arg4;
+    register xlen_t a5 asm("a5") = arg5;
+    register xlen_t a6 asm("a6") = fid;
+    register xlen_t a7 asm("a7") = eid;
 
-    __asm__ __volatile__("ecall"
-                         : "=r"(a0), "=r"(a1)
-                         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
-                         : "memory");
+    asm volatile("ecall"
+                 : "=r"(a0), "=r"(a1)
+                 : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
+                 : "memory");
     return { static_cast<long>(a0), { a1 } };
 }
 
@@ -235,8 +236,10 @@ int getchar() {
 // No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.
 // I use template here because I wasn't sure what's the best type for process::sp: xlen_t, xlen_t *, vaddr_t, or vaddr_t
 // *?
-template <typename T> __attribute__((naked)) void switch_context(T *prev_sp, T next_sp) {
-    __asm__ __volatile__(
+template <typename T>
+[[gnu::naked]]
+void switch_context(T *prev_sp, T next_sp) {
+    asm volatile(
         // clang-format off
         // Save callee-saved registers onto the current process's stack.
         "addi sp, sp, -%[size]\n"
@@ -285,13 +288,13 @@ template <typename T> __attribute__((naked)) void switch_context(T *prev_sp, T n
           [s10_offset] "i"(offsetof(callee_saved_regs, s10)), [s11_offset] "i"(offsetof(callee_saved_regs, s11)));
 }
 
-// ↓ __attribute__((naked)) is very important!
-__attribute__((naked)) void user_entry(void) {
-    __asm__ __volatile__("csrw sepc, %[sepc]        \n"
-                         "csrw sstatus, %[sstatus]  \n"
-                         "sret                      \n"
-                         :
-                         : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
+[[gnu::naked]]
+void user_entry(void) {
+    asm volatile("csrw sepc, %[sepc]        \n"
+                 "csrw sstatus, %[sstatus]  \n"
+                 "sret                      \n"
+                 :
+                 : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
 }
 
 struct process procs[PROCS_MAX]; // All process control structures.
@@ -370,7 +373,7 @@ void yield() {
 
     auto kernel_stack = reinterpret_cast<xlen_t>(&next->stack[sizeof(next->stack)]);
 
-    __asm__ __volatile__(
+    asm volatile(
         // Switch page table
         "sfence.vma\n"
         "csrw satp, %[satp]\n"
@@ -458,10 +461,11 @@ extern "C" void kernel_main() {
     PANIC("switched to idle process");
 }
 
-__attribute__((section(".text.boot"))) __attribute__((naked)) void boot() {
-    __asm__ __volatile__("mv sp, %[stack_top]\n" // Set the stack pointer
-                         "j kernel_main\n"       // Jump to the kernel main function
-                         :
-                         : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
+[[using gnu: section(".text.boot"), naked]]
+void boot() {
+    asm volatile("mv sp, %[stack_top]\n" // Set the stack pointer
+                 "j kernel_main\n"       // Jump to the kernel main function
+                 :
+                 : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
     );
 }

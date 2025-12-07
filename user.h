@@ -3,5 +3,6 @@
 
 extern "C" {
 
-__attribute__((noreturn)) void exit(void);
+[[noreturn]]
+void exit(void);
 }

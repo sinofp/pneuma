@@ -4,3 +4,6 @@ ColumnLimit: 120
 BreakConstructorInitializers: BeforeComma
 Cpp11BracedListStyle: false
 SpaceAfterCStyleCast: true
+BreakAfterAttributes: Always
+BreakBeforeInlineASMColon: Always
+AlignEscapedNewlines: LeftWithLastLine

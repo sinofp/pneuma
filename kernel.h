@@ -11,11 +11,11 @@ struct sbiret {
 
 constexpr decltype(sbiret::error) SBI_SUCCESS = 0;
 
-#define PANIC(fmt, ...)                                                                                                \
-    do {                                                                                                               \
-        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                          \
-        while (1) {                                                                                                    \
-        }                                                                                                              \
+#define PANIC(fmt, ...)                                                       \
+    do {                                                                      \
+        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
+        while (1) {                                                           \
+        }                                                                     \
     } while (0)
 
 #if __riscv_xlen == 32
@@ -32,7 +32,7 @@ using xlen_t = unsigned long;
 
 constexpr xlen_t SBI_EID_DBCN = 0x4442434E;
 
-struct callee_saved_regs {
+struct [[gnu::packed]] callee_saved_regs {
     xlen_t ra;
     xlen_t s0;
     xlen_t s1;
@@ -46,9 +46,9 @@ struct callee_saved_regs {
     xlen_t s9;
     xlen_t s10;
     xlen_t s11;
-} __attribute__((packed));
+};
 
-struct trap_frame {
+struct [[gnu::packed]] trap_frame {
     xlen_t ra;
     xlen_t gp;
     xlen_t tp;
@@ -80,19 +80,20 @@ struct trap_frame {
     xlen_t s10;
     xlen_t s11;
     xlen_t sp;
-} __attribute__((packed));
+};
 
-#define READ_CSR(reg)                                                                                                  \
-    ({                                                                                                                 \
-        xlen_t __tmp;                                                                                                  \
-        __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                                                          \
-        __tmp;                                                                                                         \
+#define READ_CSR(reg)                         \
+    ({                                        \
+        xlen_t __tmp;                         \
+        __asm__ __volatile__("csrr %0, " #reg \
+                             : "=r"(__tmp));  \
+        __tmp;                                \
     })
 
-#define WRITE_CSR(reg, value)                                                                                          \
-    do {                                                                                                               \
-        xlen_t __tmp = (value);                                                                                        \
-        __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp));                                                        \
+#define WRITE_CSR(reg, value)                                   \
+    do {                                                        \
+        xlen_t __tmp = (value);                                 \
+        __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp)); \
     } while (0)
 
 constexpr size_t PROCS_MAX = 8; // Maximum number of processes
