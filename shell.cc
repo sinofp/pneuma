@@ -3,13 +3,13 @@
 extern "C" void main(void) {
     for (;;) {
     prompt:
-        puts("> ");
+        printf("> ");
         char cmdline[128];
         for (int i = 0;; i++) {
             char ch = getchar();
             putchar(ch);
             if (i == sizeof(cmdline) - 1) {
-                puts("command line too long\n");
+                printf("command line too long\n");
                 goto prompt;
             } else if (ch == '\r') {
                 printf("\n");
@@ -21,7 +21,7 @@ extern "C" void main(void) {
         }
 
         if (strcmp(cmdline, "hello") == 0)
-            puts("Hello world from shell!\n");
+            printf("Hello world from shell!\n");
         else if (strcmp(cmdline, "exit") == 0 || strcmp(cmdline, "q") == 0)
             exit();
         else

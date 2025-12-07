@@ -1,5 +1,7 @@
 #include "common.h"
 
+extern int sbi_debug_console_write(const char *);
+
 void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
     auto *d = static_cast<uint8_t *>(dst);
     auto *s = static_cast<const uint8_t *>(src);
@@ -56,9 +58,12 @@ void printf(const char *__restrict__ format, ...) {
             case '%': // Print '%'
                 putchar('%');
                 break;
-            case 's':
-                puts(va_arg(vargs, const char *));
+            case 's': {
+                const auto *s = va_arg(vargs, const char *);
+                for (auto i = 0uz; s[i] != '\0'; ++i)
+                    putchar(s[i]);
                 break;
+            }
             case 'd': {
                 auto value = va_arg(vargs, int);
                 // https://github.com/nuta/operating-system-in-1000-lines/issues/64
@@ -92,7 +97,8 @@ void printf(const char *__restrict__ format, ...) {
                 break;
             }
             case 'p':
-                puts("0x");
+                putchar('0');
+                putchar('x');
                 // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict, and
                 // use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
                 print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));

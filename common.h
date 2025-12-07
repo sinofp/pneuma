@@ -36,11 +36,14 @@ void printf(const char *__restrict__, ...);
 
 // Below functions are implemented in kernel using OpenSBI, and user using
 // syscall
-extern void putchar(char);
-extern void puts(const char *);
-extern long getchar();
+extern int putchar(int);
+extern int getchar();
 }
 
-constexpr unsigned SYS_PUTCHAR = 1;
-constexpr unsigned SYS_GETCHAR = 2;
-constexpr unsigned SYS_EXIT = 3;
+// Techinically, they should be xlen_t, because they need to fit in a0
+// However, I don't want to expose xlen_t to user application.
+constexpr unsigned long SYS_PUTCHAR = 1;
+constexpr unsigned long SYS_GETCHAR = 2;
+constexpr unsigned long SYS_EXIT = 3;
+
+constexpr int EOF = -1;

@@ -153,41 +153,46 @@ __attribute__((naked)) __attribute__((aligned(4))) void kernel_entry() {
           [s11_offset] "i"(offsetof(trap_frame, s11)), [sp_offset] "i"(offsetof(trap_frame, sp)));
 }
 
-struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long fid, long eid) {
-    register long a0 __asm__("a0") = arg0;
-    register long a1 __asm__("a1") = arg1;
-    register long a2 __asm__("a2") = arg2;
-    register long a3 __asm__("a3") = arg3;
-    register long a4 __asm__("a4") = arg4;
-    register long a5 __asm__("a5") = arg5;
-    register long a6 __asm__("a6") = fid;
-    register long a7 __asm__("a7") = eid;
+// Many function arguments in SBI spec are defined as unsigned long.
+// I prefer xlen_t for clarity, although they're the same.
+sbiret sbi_call(xlen_t arg0, xlen_t arg1, xlen_t arg2, xlen_t arg3, xlen_t arg4, xlen_t arg5, xlen_t fid, xlen_t eid) {
+    register xlen_t a0 __asm__("a0") = arg0;
+    register xlen_t a1 __asm__("a1") = arg1;
+    register xlen_t a2 __asm__("a2") = arg2;
+    register xlen_t a3 __asm__("a3") = arg3;
+    register xlen_t a4 __asm__("a4") = arg4;
+    register xlen_t a5 __asm__("a5") = arg5;
+    register xlen_t a6 __asm__("a6") = fid;
+    register xlen_t a7 __asm__("a7") = eid;
 
     __asm__ __volatile__("ecall"
                          : "=r"(a0), "=r"(a1)
                          : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
                          : "memory");
-    return (struct sbiret) { .error = a0, .value = a1 };
+    return { static_cast<long>(a0), { a1 } };
 }
 
-void putchar(char ch) {
+int putchar(int ch) {
     // DBCN: Console Write Byte (FID #2), struct sbiret sbi_debug_console_write_byte(uint8_t byte)
-    sbi_call((uint8_t) ch, 0, 0, 0, 0, 0, 2, 0x4442434E);
+    const auto ret = sbi_call(static_cast<uint8_t>(ch), 0, 0, 0, 0, 0, 2, SBI_EID_DBCN);
+    if (SBI_SUCCESS == ret.error)
+        return ch;
+    else
+        return EOF;
 }
 
-void puts(const char *s) {
-    // DBCN: Console Write (FID #0) struct sbiret sbi_debug_console_write(unsigned long num_bytes, unsigned long
+int getchar() {
+    // DBCN: Console Read (FID #1), struct sbiret sbi_debug_console_read(unsigned long num_bytes, unsigned long
     // base_addr_lo, unsigned long base_addr_hi)
-    unsigned long num_bytes;
-    for (num_bytes = 0; s[num_bytes] != '\0'; ++num_bytes) {
-    }
-    long base_addr = (long) s;
-    sbi_call(num_bytes, base_addr, 0, 0, 0, 0, 0, 0x4442434E);
-}
-
-long getchar() {
-    struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
-    return ret.error;
+    char ch = '\0'; // C Manual: 'Character values are returned as an unsigned char converted to an int'
+    const unsigned long num_bytes = sizeof(char);
+    const auto base_addr = reinterpret_cast<xlen_t>(&ch);
+    const auto ret = sbi_call(num_bytes, base_addr, 0, 0, 0, 0, 1, SBI_EID_DBCN);
+    if (SBI_SUCCESS == ret.error and num_bytes == ret.uvalue)
+        return ch;
+    else
+        // This is a non-blocking call, so can return SBI_SUCCESS with no value. It's an error for us
+        return EOF;
 }
 
 // No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.
@@ -249,7 +254,7 @@ __attribute__((naked)) void user_entry(void) {
                          "csrw sstatus, %[sstatus]  \n"
                          "sret                      \n"
                          :
-                         : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
+                         : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
 }
 
 struct process procs[PROCS_MAX]; // All process control structures.
@@ -347,7 +352,7 @@ void handle_syscall(struct trap_frame *f) {
     case SYS_GETCHAR:
         for (;;) {
             long ch = getchar();
-            if (ch >= 0) {
+            if (ch != EOF) {
                 f->a0 = ch;
                 break;
             }
@@ -366,14 +371,15 @@ void handle_syscall(struct trap_frame *f) {
 }
 
 extern "C" void handle_trap(struct trap_frame *f) {
-    uint32_t scause = READ_CSR(scause);
-    uint32_t stval = READ_CSR(stval);
-    uint32_t user_pc = READ_CSR(sepc);
+    // sxlen_t?
+    xlen_t scause = READ_CSR(scause);
+    xlen_t stval = READ_CSR(stval);
+    xlen_t user_pc = READ_CSR(sepc);
 
     if (scause == SCAUSE_ECALL) {
         handle_syscall(f);
         // Advance an instruction to skip the ecall
-        user_pc += 4;
+        user_pc += 4; // Instructions are always 4 bytes, even on RV64
     } else {
         PANIC("unexpected trap scause=0x%x, stval=0x%x, sepc=0x%x\n", scause, stval, user_pc);
     }
@@ -382,22 +388,16 @@ extern "C" void handle_trap(struct trap_frame *f) {
 }
 
 extern "C" void kernel_main() {
-    memset(__bss, 0, (size_t) __bss_end - (size_t) __bss);
+    memset(__bss, 0, __bss_end - __bss);
 
-    WRITE_CSR(stvec, (uint32_t) kernel_entry);
-
-    const char *s = "\n\nhello world!\n";
-    for (int i = 0; s[i] != '\0'; i++) {
-        putchar(s[i]);
-    }
-    puts(s);
+    WRITE_CSR(stvec, reinterpret_cast<xlen_t>(kernel_entry));
 
     printf("\n\nhello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
     printf("1 + 2 = %d, 0x%x, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
 
-    paddr_t paddr0 = alloc_pages(2);
-    paddr_t paddr1 = alloc_pages(1);
+    auto paddr0 = alloc_pages(2);
+    auto paddr1 = alloc_pages(1);
     printf("alloc_pages test: paddr0=0x%x\n", paddr0);
     printf("alloc_pages test: paddr1=0x%x\n", paddr1);
 
@@ -405,7 +405,11 @@ extern "C" void kernel_main() {
     idle_proc->pid = 0; // idle
     current_proc = idle_proc;
 
-    create_process(_binary_shell_bin_start, (size_t) _binary_shell_bin_size);
+    printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
+    printf("_binary_shell_bin_start is 0x%x\n", _binary_shell_bin_start);
+    printf("_binary_shell_bin_size is 0x%x\n", _binary_shell_bin_size);
+    printf("About to create shell\n");
+    create_process(_binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size));
 
     yield();
     PANIC("switched to idle process");

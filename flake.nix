@@ -88,6 +88,7 @@
               export QEMU_OPENSBI="${opensbi}/share/opensbi"
               export CLANG="${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang"
               export LLD="${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
+	      export PATH="$PWD:$PATH" # run
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"
               echo "LLD: $LLD"
@@ -100,10 +101,10 @@
               echo "  nix build .#rv64-shell  # RV64 shell"
               echo ""
               echo "Run with:"
-              echo "  ./run.sh           # RV32 (default)"
-              echo "  ./run.sh rv64      # RV64"
-              echo "  ./run.sh --debug   # RV32 with debugger"
-              echo "  ./run.sh rv64 --debug  # RV64 with debugger"
+              echo "  run           # RV32 (default)"
+              echo "  run rv64      # RV64"
+              echo "  run --debug   # RV32 with debugger"
+              echo "  run rv64 --debug  # RV64 with debugger"
             '';
           };
         }

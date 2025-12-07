@@ -4,10 +4,12 @@
 struct sbiret {
     long error;
     union {
-        long value;
         unsigned long uvalue;
+        long value;
     };
 };
+
+constexpr decltype(sbiret::error) SBI_SUCCESS = 0;
 
 #define PANIC(fmt, ...)                                                                                                \
     do {                                                                                                               \
@@ -27,6 +29,8 @@ struct sbiret {
 // Or uintptr_t.
 // I choose unsigned long because of its usage in OpenSBI interfaces
 using xlen_t = unsigned long;
+
+constexpr xlen_t SBI_EID_DBCN = 0x4442434E;
 
 struct callee_saved_regs {
     xlen_t ra;
@@ -114,5 +118,6 @@ constexpr unsigned PAGE_X = 1 << 3; // Executable
 constexpr unsigned PAGE_U = 1 << 4; // User (accessible in user mode)
 
 constexpr unsigned SSTATUS_SPIE = 1 << 5;
+constexpr unsigned SSTATUS_SUM = 1 << 18; // Permit Supervisor User Memory access
 
 constexpr unsigned SCAUSE_ECALL = 8;
