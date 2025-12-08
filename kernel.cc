@@ -15,74 +15,72 @@ paddr_t alloc_pages(size_t n) {
     auto paddr = next_paddr;
     next_paddr += n * PAGE_SIZE;
 
-    if (next_paddr > reinterpret_cast<paddr_t>(__free_ram_end))
+    if (next_paddr > reinterpret_cast<paddr_t>(__free_ram_end)) [[unlikely]]
         PANIC("out of memory");
 
     memset(reinterpret_cast<void *>(paddr), 0, n * PAGE_SIZE);
     return paddr;
 }
 
-#if __riscv_xlen == 32
-void map_page(paddr_t *table1, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
-#else
-void map_page(paddr_t *table2, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
-#endif
-    if (!is_aligned(vaddr, PAGE_SIZE))
+void map_page(paddr_t *page_table, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+    if (!is_aligned(vaddr, PAGE_SIZE)) [[unlikely]]
         PANIC("unaligned vaddr %p", reinterpret_cast<void *>(vaddr));
 
-    if (!is_aligned(paddr, PAGE_SIZE))
+    if (!is_aligned(paddr, PAGE_SIZE)) [[unlikely]]
         PANIC("unaligned paddr 0x%lx", paddr);
 
     // TODO recurisive?
 
-#if __riscv_xlen == 32
-    // Every VPN in Sv32 is 10-bit
-    const xlen_t vpn1 = vaddr >> 22;           // [31:22]
-    const xlen_t vpn0 = (vaddr >> 12) & 0x3ff; // [21:12]
+    if constexpr (__riscv_xlen == 32) {
+        // Sv32: 2-level page table, 10-bit VPNs
+        auto *table1 = page_table;
+        const xlen_t vpn1 = vaddr >> 22;           // [31:22]
+        const xlen_t vpn0 = (vaddr >> 12) & 0x3ff; // [21:12]
 
-    xlen_t pte = table1[vpn1];
-    if (!(pte & PAGE_V)) {
-        // Create the first level page if it doesn't exist
-        auto pt_paddr = alloc_pages(1);
-        xlen_t ppn = pt_paddr / PAGE_SIZE;
-        table1[vpn1] = pte = ppn << 10 | PAGE_V;
+        xlen_t pte = table1[vpn1];
+        if (!(pte & PAGE_V)) {
+            // Create the first level page if it doesn't exist
+            auto pt_paddr = alloc_pages(1);
+            xlen_t ppn = pt_paddr / PAGE_SIZE;
+            table1[vpn1] = pte = ppn << 10 | PAGE_V;
+        }
+
+        xlen_t ppn = pte >> 10;
+        auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
+        ppn = paddr / PAGE_SIZE; // == >> 12, why waste the last two bits of PTE?
+        pte = ppn << 10 | flags | PAGE_V;
+        table0[vpn0] = pte;
+    } else {
+        // Sv39: 3-level page table, 9-bit VPNs
+        auto *table2 = page_table;
+        const xlen_t vpn2 = (vaddr >> 30) & 0x1ff; // Ignore sign extension [63:39], keep [38:30]
+        const xlen_t vpn1 = (vaddr >> 21) & 0x1ff; // [29:21]
+        const xlen_t vpn0 = (vaddr >> 12) & 0x1ff; // [20:12]
+
+        xlen_t pte = table2[vpn2];
+        if (!(pte & PAGE_V)) {
+            // Create the second level page if it doesn't exist
+            auto pt_paddr = alloc_pages(1);
+            xlen_t ppn = pt_paddr / PAGE_SIZE;
+            table2[vpn2] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
+        }
+
+        xlen_t ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
+        auto *const table1 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
+        pte = table1[vpn1];
+        if (!(pte & PAGE_V)) {
+            // Create the first level page if it doesn't exist
+            auto pt_paddr = alloc_pages(1);
+            xlen_t ppn = pt_paddr / PAGE_SIZE;
+            table1[vpn1] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
+        }
+
+        ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
+        auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
+        ppn = paddr / PAGE_SIZE;
+        pte = ppn << 10 | flags | PAGE_V;
+        table0[vpn0] = pte;
     }
-
-    xlen_t ppn = pte >> 10;
-    auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
-    ppn = paddr / PAGE_SIZE; // == >> 12, why waste the last two bits of PTE?
-    pte = ppn << 10 | flags | PAGE_V;
-    table0[vpn0] = pte;
-#else
-    // Every VPN in Sv39 is 9-bit
-    const xlen_t vpn2 = (vaddr >> 30) & 0x1ff; // Ignore sign extension [63:39], keep [38:30]
-    const xlen_t vpn1 = (vaddr >> 21) & 0x1ff; // [29:21]
-    const xlen_t vpn0 = (vaddr >> 12) & 0x1ff; // [20:12]
-
-    xlen_t pte = table2[vpn2];
-    if (!(pte & PAGE_V)) {
-        // Create the second level page if it doesn't exist
-        auto pt_paddr = alloc_pages(1);
-        xlen_t ppn = pt_paddr / PAGE_SIZE;
-        table2[vpn2] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
-    }
-
-    xlen_t ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
-    auto *const table1 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
-    pte = table1[vpn1];
-    if (!(pte & PAGE_V)) {
-        // Create the first level page if it doesn't exist
-        auto pt_paddr = alloc_pages(1);
-        xlen_t ppn = pt_paddr / PAGE_SIZE;
-        table1[vpn1] = pte = ppn << 10 | PAGE_V; // No need to sign ext for pte
-    }
-
-    ppn = (pte >> 10) & 0xfff'ffff'ffff; // Ignore reserved [63:54], keep [53:10]
-    auto *const table0 = reinterpret_cast<paddr_t *>(ppn * PAGE_SIZE);
-    ppn = paddr / PAGE_SIZE;
-    pte = ppn << 10 | flags | PAGE_V;
-    table0[vpn0] = pte;
-#endif
 }
 
 [[using gnu: naked, aligned(4)]]
@@ -304,12 +302,12 @@ struct process *create_process(const void *image, size_t image_size) {
     struct process *proc = nullptr;
     size_t i;
     for (i = 0; i < PROCS_MAX; i++)
-        if (procs[i].state == PROC_UNUSED) {
+        if (procs[i].state == ProcState::UNUSED) {
             proc = &procs[i];
             break;
         }
 
-    if (!proc)
+    if (!proc) [[unlikely]]
         PANIC("no free process slots");
 
     // Stack callee-saved registers. These register values will be restored in
@@ -342,7 +340,7 @@ struct process *create_process(const void *image, size_t image_size) {
     // TODO C++ construct and swap?
     proc->pid = i + 1;
     proc->sp = sp;
-    proc->state = PROC_RUNNABLE;
+    proc->state = ProcState::RUNNABLE;
     proc->page_table = page_table;
     return proc;
 }
@@ -355,7 +353,7 @@ void yield() {
     struct process *next = idle_proc;
     for (auto i = 0uz; i < PROCS_MAX; i++) {
         struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
-        if (proc->state == PROC_RUNNABLE && proc->pid > 0) {
+        if (proc->state == ProcState::RUNNABLE && proc->pid > 0) {
             next = proc;
             break;
         }
@@ -407,7 +405,7 @@ void handle_syscall(struct trap_frame *f) {
         break;
     case SYS_EXIT:
         printf("process %d exited\n", current_proc->pid);
-        current_proc->state = PROC_EXITED;
+        current_proc->state = ProcState::EXITED;
         // TODO free resources of exited proc
         yield();
         PANIC("unreachable");
@@ -426,7 +424,7 @@ extern "C" void handle_trap(struct trap_frame *f) {
         handle_syscall(f);
         // Advance an instruction to skip the ecall
         user_pc += 4; // Instructions are always 4 bytes, even on RV64
-    } else {
+    } else [[unlikely]] {
         PANIC("unexpected trap scause=0x%x, stval=0x%x, sepc=0x%x\n", scause, stval, user_pc);
     }
 

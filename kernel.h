@@ -98,17 +98,19 @@ struct [[gnu::packed]] trap_frame {
 
 constexpr size_t PROCS_MAX = 8; // Maximum number of processes
 
-constexpr unsigned PROC_UNUSED = 0;   // Unused process control structure
-constexpr unsigned PROC_RUNNABLE = 1; // Runnable process
-constexpr unsigned PROC_EXITED = 2;
+enum class ProcState {
+    UNUSED,
+    RUNNABLE,
+    EXITED,
+};
 
 struct process {
-    size_t pid; // Process ID
-    int state;  // Process state: PROC_UNUSED or PROC_RUNNABLE
+    size_t pid;      // Process ID
+    ProcState state; // Process state
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
                 // be a vaddr_t *.
     uint8_t stack[8192]; // Kernel stack
-    paddr_t *page_table;
+    paddr_t *page_table; // Page table for this process
 };
 
 constexpr xlen_t SATP_SV32 = 1u << 31;
