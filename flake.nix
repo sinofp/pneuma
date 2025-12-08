@@ -168,6 +168,7 @@
                 cp ${./kernel.h} kernel.h
                 cp ${./common.cc} common.cc
                 cp ${./common.h} common.h
+                cp ${./span.h} span.h
                 cp ${./user.ld} user.ld
                 cp ${./kernel.ld} kernel.ld
 

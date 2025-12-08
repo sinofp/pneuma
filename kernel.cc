@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "common.h"
+#include "span.h"
 
 // The base virtual address of an application image. This needs to match the
 // starting address defined in `user.ld`.
@@ -295,11 +296,11 @@ void user_entry(void) {
                  : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
 }
 
-struct process procs[PROCS_MAX]; // All process control structures.
+process procs[PROCS_MAX]; // All process control structures.
 
-struct process *create_process(const void *image, size_t image_size) {
+process *create_process(span<const uint8_t> image) {
     // Find an unused process control structure.
-    struct process *proc = nullptr;
+    process *proc = nullptr;
     size_t i;
     for (i = 0; i < PROCS_MAX; i++)
         if (procs[i].state == ProcState::UNUSED) {
@@ -328,11 +329,12 @@ struct process *create_process(const void *image, size_t image_size) {
         map_page(page_table, kaddr, kaddr, PAGE_R | PAGE_W | PAGE_X);
 
     // Map user pages.
-    for (auto offset = 0uz; offset < image_size; offset += PAGE_SIZE) {
+    for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
         paddr_t page = alloc_pages(1);
 
         // Fill and map the page.
-        memcpy((void *) page, static_cast<const uint8_t *>(image) + offset, min(PAGE_SIZE, image_size - offset));
+        auto chunk = image.subspan(offset, min(PAGE_SIZE, image.size() - offset));
+        memcpy((void *) page, chunk.data(), chunk.size());
         map_page(page_table, USER_BASE + offset, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
@@ -345,14 +347,14 @@ struct process *create_process(const void *image, size_t image_size) {
     return proc;
 }
 
-struct process *current_proc; // Currently running process
-struct process *idle_proc;    // Idle process
+process *current_proc; // Currently running process
+process *idle_proc;    // Idle process
 
 void yield() {
     // Search for a runnable process
-    struct process *next = idle_proc;
+    process *next = idle_proc;
     for (auto i = 0uz; i < PROCS_MAX; i++) {
-        struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
+        process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
         if (proc->state == ProcState::RUNNABLE && proc->pid > 0) {
             next = proc;
             break;
@@ -383,12 +385,12 @@ void yield() {
         : [satp] "r"(satp), [sscratch] "r"(kernel_stack));
 
     // Context switch
-    struct process *prev = current_proc;
+    process *prev = current_proc;
     current_proc = next;
     switch_context(&prev->sp, next->sp);
 }
 
-void handle_syscall(struct trap_frame *f) {
+void handle_syscall(trap_frame *f) {
     switch (f->a3) {
     case SYS_PUTCHAR:
         putchar(f->a0);
@@ -410,11 +412,11 @@ void handle_syscall(struct trap_frame *f) {
         yield();
         PANIC("unreachable");
     default:
-        PANIC("unexpected syscall a3=0x%x\n", f->a3);
+        PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
 }
 
-extern "C" void handle_trap(struct trap_frame *f) {
+extern "C" void handle_trap(trap_frame *f) {
     // sxlen_t?
     xlen_t scause = READ_CSR(scause);
     xlen_t stval = READ_CSR(stval);
@@ -425,7 +427,7 @@ extern "C" void handle_trap(struct trap_frame *f) {
         // Advance an instruction to skip the ecall
         user_pc += 4; // Instructions are always 4 bytes, even on RV64
     } else [[unlikely]] {
-        PANIC("unexpected trap scause=0x%x, stval=0x%x, sepc=0x%x\n", scause, stval, user_pc);
+        PANIC("unexpected trap scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
     }
 
     WRITE_CSR(sepc, user_pc);
@@ -438,22 +440,22 @@ extern "C" void kernel_main() {
 
     printf("\n\nhello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
-    printf("1 + 2 = %d, 0x%x, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
+    printf("1 + 2 = %d, 0x%lx, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
 
     auto paddr0 = alloc_pages(2);
     auto paddr1 = alloc_pages(1);
-    printf("alloc_pages test: paddr0=0x%x\n", paddr0);
-    printf("alloc_pages test: paddr1=0x%x\n", paddr1);
+    printf("alloc_pages test: paddr0=0x%lx\n", paddr0);
+    printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
-    idle_proc = create_process(nullptr, 0);
+    idle_proc = create_process({ nullptr, 0 });
     idle_proc->pid = 0; // idle
     current_proc = idle_proc;
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
-    printf("_binary_shell_bin_start is 0x%x\n", _binary_shell_bin_start);
-    printf("_binary_shell_bin_size is 0x%x\n", _binary_shell_bin_size);
+    printf("_binary_shell_bin_start is 0x%lx\n", _binary_shell_bin_start);
+    printf("_binary_shell_bin_size is 0x%lx\n", _binary_shell_bin_size);
     printf("About to create shell\n");
-    create_process(_binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size));
+    create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
 
     yield();
     PANIC("switched to idle process");

@@ -3,6 +3,7 @@
 
 struct sbiret {
     long error;
+
     union {
         unsigned long uvalue;
         long value;

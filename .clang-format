@@ -7,3 +7,4 @@ SpaceAfterCStyleCast: true
 BreakAfterAttributes: Always
 BreakBeforeInlineASMColon: Always
 AlignEscapedNewlines: LeftWithLastLine
+SeparateDefinitionBlocks: Always
