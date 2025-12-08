@@ -43,6 +43,25 @@ template <typename T> void print_hex(T value) {
         putchar("0123456789abcdef"[nibble]);
     }
 }
+
+template <typename T> void print_dec(T value) {
+    // https://github.com/nuta/operating-system-in-1000-lines/issues/64
+    __make_unsigned(T) magnitude = value;
+    if (value < 0) {
+        putchar('-');
+        magnitude = -magnitude;
+    }
+
+    decltype(magnitude) divisor = 1;
+    while (magnitude / divisor > 9)
+        divisor *= 10;
+
+    while (divisor) {
+        putchar('0' + magnitude / divisor);
+        magnitude %= divisor;
+        divisor /= 10;
+    }
+}
 } // namespace
 
 void printf(const char *__restrict__ format, ...) {
@@ -64,44 +83,41 @@ void printf(const char *__restrict__ format, ...) {
                     putchar(s[i]);
                 break;
             }
-            case 'd': {
-                auto value = va_arg(vargs, int);
-                // https://github.com/nuta/operating-system-in-1000-lines/issues/64
-                unsigned magnitude = value;
-                if (value < 0) {
-                    putchar('-');
-                    magnitude = -magnitude;
-                }
-
-                unsigned divisor = 1;
-                while (magnitude / divisor > 9)
-                    divisor *= 10;
-
-                while (divisor) {
-                    putchar('0' + magnitude / divisor);
-                    magnitude %= divisor;
-                    divisor /= 10;
-                }
+            case 'd':
+                print_dec(va_arg(vargs, int));
                 break;
-            }
             case 'x':
                 print_hex(va_arg(vargs, unsigned));
                 break;
-            case 'l': {
+            case 'l':
                 switch (*++format) {
+                case 'd':
+                    print_dec(va_arg(vargs, long));
+                    break;
                 case 'x':
                     print_hex(va_arg(vargs, unsigned long));
                     break;
+                case 'l':
+                    switch (*++format) {
+                    // Don't work on RV32 because 64-bit division
+                    // case 'd':
+                    //     print_dec(va_arg(vargs, long long));
+                    //     break;
+                    case 'x':
+                        print_hex(va_arg(vargs, unsigned long long));
+                        break;
+                        break;
+                    }
+                    break;
+                case 'p':
+                    putchar('0');
+                    putchar('x');
+                    // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict,
+                    // and use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
+                    print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
+                    break;
                 default:
                 }
-                break;
-            }
-            case 'p':
-                putchar('0');
-                putchar('x');
-                // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict, and
-                // use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
-                print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
                 break;
             default:
             }

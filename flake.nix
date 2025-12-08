@@ -169,6 +169,7 @@
                 cp ${./common.cc} common.cc
                 cp ${./common.h} common.h
                 cp ${./span.h} span.h
+                cp ${./virtio.h} virtio.h
                 cp ${./user.ld} user.ld
                 cp ${./kernel.ld} kernel.ld
 

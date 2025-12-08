@@ -28,6 +28,7 @@ template <typename T> inline T min(T a, T b) { return a < b ? a : b; }
 
 extern "C" {
 
+// TODO use span
 void *memcpy(void *__restrict__, const void *__restrict__, size_t);
 void *memset(void *, int, size_t);
 char *strcpy(char *, const char *); // TODO replace by strlcpy

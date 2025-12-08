@@ -91,7 +91,10 @@ if [[ $debug == true ]] {
 
     # Start QEMU in background with debugger support
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
-          --no-reboot -kernel $qemu_kernel -s -S &
+          --no-reboot -kernel $qemu_kernel \
+          -drive id=drive0,file=lorem.txt,format=raw,if=none \
+          -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
+          -s -S &
 
     local qemu_pid=$!
 
@@ -117,5 +120,7 @@ if [[ $debug == true ]] {
     }
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
           --no-reboot -kernel $qemu_kernel \
-          -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
+          -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log \
+          -drive id=drive0,file=lorem.txt,format=raw,if=none \
+          -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0
 }
