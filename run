@@ -83,6 +83,10 @@ if [[ $use_uboot == true ]] {
     qemu_kernel=$kernel_elf
 }
 
+pushd disk
+tar cf ../disk.tar --format=ustar *.txt
+popd
+
 if [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
@@ -92,7 +96,7 @@ if [[ $debug == true ]] {
     # Start QEMU in background with debugger support
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
           --no-reboot -kernel $qemu_kernel \
-          -drive id=drive0,file=lorem.txt,format=raw,if=none \
+	  -drive id=drive0,file=disk.tar,format=raw,if=none \
           -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
           -s -S &
 
@@ -121,6 +125,6 @@ if [[ $debug == true ]] {
     $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
           --no-reboot -kernel $qemu_kernel \
           -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log \
-          -drive id=drive0,file=lorem.txt,format=raw,if=none \
+	  -drive id=drive0,file=disk.tar,format=raw,if=none \
           -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0
 }

@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "common.h"
+#include "file.h"
 #include "span.h"
 #include "virtio.h"
 
@@ -394,6 +395,9 @@ void yield() {
     switch_context(&prev->sp, next->sp);
 }
 
+file files[FILES_MAX];
+void fs_flush();
+
 void handle_syscall(trap_frame *f) {
     switch (f->a3) {
     case SYS_PUTCHAR:
@@ -415,6 +419,34 @@ void handle_syscall(trap_frame *f) {
         // TODO free resources of exited proc
         yield();
         PANIC("unreachable");
+    case SYS_READFILE:
+    case SYS_WRITEFILE: {
+        size_t i = f->a0;
+        auto *buf = reinterpret_cast<char *>(f->a1);
+        size_t len = f->a2;
+
+        if (i >= FILES_MAX or i < FILES_MAX and files[i].name[0] == '\0') {
+            printf("file descriptor not found: %d\n", i);
+            f->a0 = -1;
+            break;
+        }
+
+        auto *fl = &files[i];
+        printf("%s %s\n", (f->a3 == SYS_WRITEFILE) ? "Writing" : "Reading", fl->name);
+
+        if (len > sizeof(fl->data))
+            len = fl->size;
+
+        if (f->a3 == SYS_WRITEFILE) {
+            memcpy(fl->data, buf, len);
+            fl->size = len;
+            fs_flush();
+        } else
+            memcpy(buf, fl->data, len);
+
+        f->a0 = len;
+        break;
+    } break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
@@ -567,12 +599,96 @@ void read_write_disk(void *buf, uint64_t sector, int is_write) {
         memcpy(buf, blk_req->data, SECTOR_SIZE);
 }
 
+uint8_t disk[DISK_MAX_SIZE];
+
+// TODO span
+int oct2int(char *oct, int len) {
+    int dec = 0;
+    for (int i = 0; i < len; i++) {
+        if (oct[i] < '0' || oct[i] > '7')
+            break;
+
+        dec = dec * 8 + (oct[i] - '0');
+    }
+    return dec;
+}
+
+void fs_init() {
+    for (uint64_t sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+        read_write_disk(&disk[sector * SECTOR_SIZE], sector, false);
+
+    auto offset = 0uz;
+    for (auto i = 0uz; i < FILES_MAX; ++i) {
+        auto *header = reinterpret_cast<tar_header *>(&disk[offset]);
+        if (header->name[0] == '\0')
+            break;
+
+        if (!strcmp(header->magic, USTAR_MAGIC))
+            PANIC("invalid tar header: magic=\"%s\"", header->magic);
+
+        auto filesz = oct2int(header->size, sizeof(header->size));
+        auto *f = &files[i];
+        f->in_use = true;
+        strcpy(f->name, header->name);
+        memcpy(f->data, header->data, filesz);
+        f->size = filesz;
+        printf("file (%d): %s, size=%d\n", i, f->name, f->size);
+
+        offset += align_up(sizeof(tar_header) + filesz, SECTOR_SIZE);
+    }
+}
+
+void fs_flush() {
+    // Copy all file contents into `disk` buffer.
+    memset(disk, 0, sizeof(disk));
+    auto offset = 0uz;
+    for (auto file_i = 0uz; file_i < FILES_MAX; ++file_i) {
+        file *f = &files[file_i];
+        if (!f->in_use)
+            continue;
+
+        auto *header = reinterpret_cast<tar_header *>(&disk[offset]);
+        memset(header, 0, sizeof(*header));
+        strcpy(header->name, f->name);
+        strcpy(header->mode, "000644");
+        strcpy(header->magic, USTAR_MAGIC);
+        strcpy(header->version, "00");
+        header->type = '0';
+
+        // Turn the f size into an octal string.
+        // TODO int2oct
+        int filesz = f->size;
+        for (int i = sizeof(header->size); i > 0; --i) {
+            header->size[i - 1] = (filesz % 8) + '0';
+            filesz /= 8;
+        }
+
+        // Calculate the checksum.
+        int checksum = ' ' * sizeof(header->checksum);
+        for (auto i = 0uz; i < sizeof(tar_header); ++i)
+            checksum += disk[offset + i];
+
+        for (int i = 5; i >= 0; --i) {
+            header->checksum[i] = (checksum % 8) + '0';
+            checksum /= 8;
+        }
+
+        // Copy f data.
+        memcpy(header->data, f->data, f->size);
+        offset += align_up(sizeof(tar_header) + f->size, SECTOR_SIZE);
+    }
+
+    // Write `disk` buffer into the virtio-blk.
+    for (uint64_t sector = 0; sector < sizeof(disk) / SECTOR_SIZE; ++sector)
+        read_write_disk(&disk[sector * SECTOR_SIZE], sector, true);
+
+    printf("wrote %d bytes to disk\n", sizeof(disk));
+}
+
 extern "C" void kernel_main() {
     memset(__bss, 0, __bss_end - __bss);
 
     WRITE_CSR(stvec, reinterpret_cast<xlen_t>(kernel_entry));
-
-    virtio_blk_init();
 
     printf("\n\nhello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
@@ -583,15 +699,8 @@ extern "C" void kernel_main() {
     printf("alloc_pages test: paddr0=0x%lx\n", paddr0);
     printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
-    char buf[SECTOR_SIZE];
-    read_write_disk(buf, 0, false /* read from the disk */);
-    printf("first sector: %s\n", buf);
-
-    strcpy(buf, "hello from kernel!!!\n");
-    read_write_disk(buf, 0, true /* write to the disk */);
-
-    read_write_disk(buf, 0, false /* read from the disk */);
-    printf("first sector (After writing): %s\n", buf);
+    virtio_blk_init();
+    fs_init();
 
     idle_proc = create_process({ nullptr, 0 });
     idle_proc->pid = 0; // idle

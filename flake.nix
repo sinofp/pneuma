@@ -158,45 +158,47 @@
                 ];
               }
               ''
-                mkdir -p $out
+                                mkdir -p $out
 
-                # Copy all source files
-                cp ${./shell.cc} shell.cc
-                cp ${./user.cc} user.cc
-                cp ${./user.h} user.h
-                cp ${./kernel.cc} kernel.cc
-                cp ${./kernel.h} kernel.h
-                cp ${./common.cc} common.cc
-                cp ${./common.h} common.h
-                cp ${./span.h} span.h
-                cp ${./virtio.h} virtio.h
-                cp ${./user.ld} user.ld
-                cp ${./kernel.ld} kernel.ld
+                                # Copy all source files
+                                cp ${./shell.cc} shell.cc
+                                cp ${./user.cc} user.cc
+                                cp ${./user.h} user.h
+                                cp ${./kernel.cc} kernel.cc
+                                cp ${./kernel.h} kernel.h
+                                cp ${./common.cc} common.cc
+                                cp ${./common.h} common.h
+                                cp ${./span.h} span.h
+                                cp ${./virtio.h} virtio.h
+                                cp ${./file.h} file.h
+                                cp ${./user.ld} user.ld
+                                cp ${./kernel.ld} kernel.ld
 
-                # Build shell.elf (for debugging symbols)
-                ${clang} ${ccflags} \
-                  --ld-path=${lld} \
-                  -Wl,-Tuser.ld \
-                  -Wl,-Map=$out/shell.map \
-                  -o $out/shell.elf \
-                  user.cc common.cc shell.cc
+                                # Build shell.elf (for debugging symbols)
+                                ${clang} ${ccflags} \
+                                  --ld-path=${lld} \
+                                  -Wl,-Tuser.ld \
+                                  -Wl,-Map=$out/shell.map \
+                                  -o $out/shell.elf \
+                                  user.cc common.cc shell.cc
 
-                # Convert shell.elf to binary
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                  $out/shell.elf $out/shell.bin
+                                # Convert shell.elf to binary
+                                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+                                  $out/shell.elf $out/shell.bin
 
-                # Convert binary to ELF object with clean symbol names
-                # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
-                # Use subshell so the latter clang stays in correct directory
-                (cd $out && ${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o)
+                                # Convert binary to ELF object with clean symbol names
+                                # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
+                                pushd $out
+                		${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o
+                		popd
 
-                # Build kernel.elf with embedded shell
-                ${clang} ${ccflags} \
-                  --ld-path=${lld} \
-                  -Wl,-Tkernel.ld \
-                  -Wl,-Map=$out/kernel.map \
-                  -o $out/kernel.elf \
-                  kernel.cc common.cc $out/shell.bin.o
+                                # Build kernel.elf with embedded shell
+                                ${clang} ${ccflags} \
+                                  --ld-path=${lld} \
+                                  -Wl,-Tkernel.ld \
+                                  -Wl,-Map=$out/kernel.map \
+                                  -o $out/kernel.elf \
+                                  kernel.cc common.cc $out/shell.bin.o
               '';
 
           # Build both architectures

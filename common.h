@@ -43,8 +43,11 @@ extern int getchar();
 
 // Techinically, they should be xlen_t, because they need to fit in a0
 // However, I don't want to expose xlen_t to user application.
+// TODO enum class
 constexpr unsigned long SYS_PUTCHAR = 1;
 constexpr unsigned long SYS_GETCHAR = 2;
 constexpr unsigned long SYS_EXIT = 3;
+constexpr unsigned long SYS_READFILE = 4;
+constexpr unsigned long SYS_WRITEFILE = 5;
 
 constexpr int EOF = -1;
