@@ -3,6 +3,9 @@
 #include "common.h"
 #include "virtio.h"
 
+void fs_init();
+void fs_flush();
+
 struct [[gnu::packed]] tar_header {
     char name[100];
     char mode[8];
@@ -35,3 +38,5 @@ struct file {
 constexpr size_t FILES_MAX = 3;
 constexpr size_t DISK_MAX_SIZE = align_up(sizeof(file) * FILES_MAX, SECTOR_SIZE);
 constexpr char USTAR_MAGIC[] = "magic=\"ustar\"";
+
+extern file files[FILES_MAX];

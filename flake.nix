@@ -141,6 +141,45 @@
           objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
+          # Source file lists (using Nix path syntax)
+          kernelSources = [
+            ./kernel.cc
+            ./proc.cc
+            ./mem.cc
+            ./sbi.cc
+            ./common.cc
+            ./virtio-blk.cc
+            ./ustar.cc
+            ./trap.cc
+          ];
+          userSources = [
+            ./user.cc
+            ./common.cc
+            ./shell.cc
+          ];
+          headers = [
+            ./kernel.h
+            ./common.h
+            ./span.h
+            ./virtio.h
+            ./file.h
+            ./mem.h
+            ./sbi.h
+            ./proc.h
+            ./user.h
+            ./trap.h
+          ];
+          linkerScripts = [
+            ./user.ld
+            ./kernel.ld
+          ];
+
+          # All source files with duplicates removed
+          allSourcePaths = pkgs.lib.unique (kernelSources ++ userSources ++ headers ++ linkerScripts);
+
+          # Helper to get just the filename from a path
+          basename = path: builtins.baseNameOf (toString path);
+
           # Helper function to build kernel with embedded shell for a specific architecture
           mkKernel =
             arch:
@@ -158,47 +197,35 @@
                 ];
               }
               ''
-                                mkdir -p $out
+                mkdir -p $out
 
-                                # Copy all source files
-                                cp ${./shell.cc} shell.cc
-                                cp ${./user.cc} user.cc
-                                cp ${./user.h} user.h
-                                cp ${./kernel.cc} kernel.cc
-                                cp ${./kernel.h} kernel.h
-                                cp ${./common.cc} common.cc
-                                cp ${./common.h} common.h
-                                cp ${./span.h} span.h
-                                cp ${./virtio.h} virtio.h
-                                cp ${./file.h} file.h
-                                cp ${./user.ld} user.ld
-                                cp ${./kernel.ld} kernel.ld
+                # Copy all source files automatically using Nix paths
+                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} ${basename path}") allSourcePaths}
 
-                                # Build shell.elf (for debugging symbols)
-                                ${clang} ${ccflags} \
-                                  --ld-path=${lld} \
-                                  -Wl,-Tuser.ld \
-                                  -Wl,-Map=$out/shell.map \
-                                  -o $out/shell.elf \
-                                  user.cc common.cc shell.cc
+                # Build shell.elf (for debugging symbols)
+                ${clang} ${ccflags} \
+                  --ld-path=${lld} \
+                  -Wl,-Tuser.ld \
+                  -Wl,-Map=$out/shell.map \
+                  -o $out/shell.elf \
+                  ${pkgs.lib.concatStringsSep " " (map basename userSources)}
 
-                                # Convert shell.elf to binary
-                                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                                  $out/shell.elf $out/shell.bin
+                # Convert shell.elf to binary
+                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+                  $out/shell.elf $out/shell.bin
 
-                                # Convert binary to ELF object with clean symbol names
-                                # cd into $out so objcopy uses just "shell.bin" as the filename for generated symbols
-                                pushd $out
-                		${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o
-                		popd
+                # Convert binary to ELF object with clean symbol names
+                pushd $out
+                ${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o
+                popd
 
-                                # Build kernel.elf with embedded shell
-                                ${clang} ${ccflags} \
-                                  --ld-path=${lld} \
-                                  -Wl,-Tkernel.ld \
-                                  -Wl,-Map=$out/kernel.map \
-                                  -o $out/kernel.elf \
-                                  kernel.cc common.cc $out/shell.bin.o
+                # Build kernel.elf with embedded shell
+                ${clang} ${ccflags} \
+                  --ld-path=${lld} \
+                  -Wl,-Tkernel.ld \
+                  -Wl,-Map=$out/kernel.map \
+                  -o $out/kernel.elf \
+                  ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} $out/shell.bin.o
               '';
 
           # Build both architectures

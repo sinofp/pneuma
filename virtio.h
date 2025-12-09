@@ -2,6 +2,9 @@
 
 #include "common.h"
 
+void virtio_blk_init();
+void read_write_disk(void *, uint64_t, int);
+
 constexpr size_t SECTOR_SIZE = 512;
 constexpr size_t VIRTQ_ENTRY_NUM = 16;
 constexpr uint32_t VIRTIO_DEVICE_BLK = 2;
