@@ -30,6 +30,7 @@ constexpr decltype(sbiret::error) SBI_SUCCESS = 0;
 // Or uintptr_t.
 // I choose unsigned long because of its usage in OpenSBI interfaces
 using xlen_t = unsigned long;
+using sxlen_t = unsigned long;
 
 constexpr xlen_t SBI_EID_DBCN = 0x4442434E;
 
@@ -85,7 +86,7 @@ struct [[gnu::packed]] trap_frame {
 
 #define READ_CSR(reg)                         \
     ({                                        \
-        xlen_t __tmp;                         \
+        sxlen_t __tmp;                        \
         __asm__ __volatile__("csrr %0, " #reg \
                              : "=r"(__tmp));  \
         __tmp;                                \
@@ -93,7 +94,7 @@ struct [[gnu::packed]] trap_frame {
 
 #define WRITE_CSR(reg, value)                                   \
     do {                                                        \
-        xlen_t __tmp = (value);                                 \
+        sxlen_t __tmp = (value);                                \
         __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp)); \
     } while (0)
 
@@ -125,4 +126,26 @@ constexpr unsigned PAGE_U = 1 << 4; // User (accessible in user mode)
 constexpr unsigned SSTATUS_SPIE = 1 << 5;
 constexpr unsigned SSTATUS_SUM = 1 << 18; // Permit Supervisor User Memory access
 
-constexpr unsigned SCAUSE_ECALL = 8;
+constexpr sxlen_t intr_bit = 1ull << (__riscv_xlen - 1);
+
+enum class SCAUSE : sxlen_t {
+    InstAddrMisaligned,
+    InstAccessFault,
+    IllegalInst,
+    Breakpoint,
+    LoadAddrMisaligned,
+    LoadAccessFault,
+    StoreAmoAddrMisaligned,
+    StoreAmoAccessFault,
+    UEcall,
+    SEcall,
+    InstPageFault = 12,
+    LoadPageFault,
+    StoreAmoPageFault = 15,
+    SoftwareCheck = 18,
+    HardwareError = 19,
+    SSoftwareIntr = intr_bit | 1,
+    STimerIntr = intr_bit | 5,
+    SExternalIntr = intr_bit | 9,
+    CntOverflowIntr = intr_bit | 13,
+};

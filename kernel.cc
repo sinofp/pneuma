@@ -318,7 +318,8 @@ process *create_process(span<const uint8_t> image) {
     auto *sp = reinterpret_cast<decltype(proc->sp)>(&proc->stack[sizeof(proc->stack)]); // the stack grows downward
     // Make space for callee_saved_regs. The number of registers of RV32 and RV64 are the same
     constexpr size_t stack_length = sizeof(callee_saved_regs) / sizeof(xlen_t);
-    sp -= stack_length;                         // The same as sp -= 13;
+    static_assert(13 == stack_length, "callee_saved_regs size donesn't equal to the number of regs");
+    sp -= stack_length;
     *sp = reinterpret_cast<xlen_t>(user_entry); // std::remove_pointer?
 
     // Identical mapping for kernel pages, prepared for user's syscalls.
@@ -454,16 +455,53 @@ void handle_syscall(trap_frame *f) {
 
 extern "C" void handle_trap(trap_frame *f) {
     // sxlen_t?
-    xlen_t scause = READ_CSR(scause);
-    xlen_t stval = READ_CSR(stval);
-    xlen_t user_pc = READ_CSR(sepc);
+    auto scause = static_cast<SCAUSE>(READ_CSR(scause));
+    auto stval = READ_CSR(stval);
+    auto user_pc = READ_CSR(sepc);
 
-    if (scause == SCAUSE_ECALL) {
+    // InstAddrMisaligned,
+    // InstAccessFault,
+    // IllegalInst,
+    // Breakpoint,
+    // LoadAddrMisaligned,
+    // LoadAccessFault,
+    // StoreAmoAddrMisaligned,
+    // StoreAmoAccessFault,
+    // UEcall,
+    // SEcall,
+    // InstPageFault = 12,
+    // LoadPageFault,
+    // StoreAmoPageFault = 15,
+    // SoftwareCheck = 18,
+    // HardwareError = 19,
+    // SSoftwareIntr = intr_bit | 1,
+    // STimerIntr = intr_bit | 5,
+    // SExternalIntr = intr_bit | 9,
+    // CntOverflowIntr = intr_bit | 13,
+    switch (scause) {
+    case SCAUSE::UEcall:
         handle_syscall(f);
         // Advance an instruction to skip the ecall
         user_pc += 4; // Instructions are always 4 bytes, even on RV64
-    } else [[unlikely]] {
-        PANIC("unexpected trap scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
+    case SCAUSE::IllegalInst:
+        PANIC("Illegal Instruction: stval=0x%lx, sepc=0x%lx\n", stval, user_pc);
+        break;
+    case SCAUSE::LoadAddrMisaligned:
+    case SCAUSE::StoreAmoAddrMisaligned:
+        PANIC("Address Misaligned: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
+    case SCAUSE::LoadAccessFault:
+    case SCAUSE::StoreAmoAccessFault:
+        PANIC("Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
+    case SCAUSE::LoadPageFault:
+    case SCAUSE::StoreAmoPageFault:
+    case SCAUSE::InstPageFault:
+        PANIC("Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
+    default:
+        PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
     }
 
     WRITE_CSR(sepc, user_pc);
