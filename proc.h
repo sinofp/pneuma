@@ -23,9 +23,6 @@ struct process {
 constexpr xlen_t SATP_SV32 = 1u << 31;
 constexpr xlen_t SATP_SV39 = 8ull << 60;
 
-constexpr unsigned SSTATUS_SPIE = 1 << 5;
-constexpr unsigned SSTATUS_SUM = 1 << 18; // Permit Supervisor User Memory access
-
 // The base virtual address of an application image. This needs to match the
 // starting address defined in `user.ld`.
 constexpr vaddr_t USER_BASE = 0x1000000;

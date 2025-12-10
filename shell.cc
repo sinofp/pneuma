@@ -41,6 +41,9 @@ extern "C" void main(void) {
             putchar('\n');
             char data[] = "爱宝宝\n";
             writefile(ch - '0', data, sizeof(data));
+        } else if (!strcmp(cmdline, "fault")) {
+            auto p = reinterpret_cast<int *>(1234);
+            *p = 5678;
         } else if (strcmp(cmdline, "exit") == 0 || strcmp(cmdline, "q") == 0)
             exit();
         else

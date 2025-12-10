@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "kernel.h"
 
 void virtio_blk_init();
 void read_write_disk(void *, uint64_t, int);

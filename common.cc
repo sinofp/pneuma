@@ -89,6 +89,13 @@ void printf(const char *__restrict__ format, ...) {
             case 'x':
                 print_hex(va_arg(vargs, unsigned));
                 break;
+            case 'p':
+                putchar('0');
+                putchar('x');
+                // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict,
+                // and use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
+                print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
+                break;
             case 'l':
                 switch (*++format) {
                 case 'd':
@@ -108,13 +115,6 @@ void printf(const char *__restrict__ format, ...) {
                         break;
                         break;
                     }
-                    break;
-                case 'p':
-                    putchar('0');
-                    putchar('x');
-                    // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arthimetict,
-                    // and use %lx for printing physicall addresses for (the last 32-bit of) Sv32 and Sv39.
-                    print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
                     break;
                 default:
                 }

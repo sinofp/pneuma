@@ -7,17 +7,6 @@
 // 32-bit on RV32, 64-bit on RV64
 using vaddr_t = uintptr_t;
 
-// Sv32 has 34-bit physical address, while Sv39 has 56-bit physical address.
-// Assume we don't need more than 4GB space for RV32 with Sv32,
-// otherwise all physical address arithmetic will become 64-bit on RV32.
-// Additionaly, I only have hardware of RV64 with Sv39, so I care more about this configuration.
-using paddr_t = uintptr_t;
-
-// The same for both Sv32 and Sv39
-constexpr size_t PAGE_SIZE = 4096;
-
-#define align_up(value, align) __builtin_align_up(value, align)
-#define is_aligned(value, align) __builtin_is_aligned(value, align)
 #define va_list __builtin_va_list
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end

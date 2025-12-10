@@ -1,4 +1,5 @@
 #include "proc.h"
+#include "csr.h"
 #include "mem.h"
 #include "virtio.h"
 
@@ -10,12 +11,12 @@ process *idle_proc;    // Idle process
 extern uint8_t __kernel_base[], __free_ram_end[];
 
 [[gnu::naked]]
-void user_entry(void) {
+void user_entry() {
     asm volatile("csrw sepc, %[sepc]        \n"
                  "csrw sstatus, %[sstatus]  \n"
                  "sret                      \n"
                  :
-                 : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE | SSTATUS_SUM));
+                 : [sepc] "r"(USER_BASE), [sstatus] "r"(csr::USER_SSTATUS));
 }
 
 process *create_process(span<const uint8_t> image) {
@@ -141,24 +142,14 @@ void yield() {
     if (next == current_proc)
         return;
 
-    xlen_t satp = reinterpret_cast<xlen_t>(next->page_table) / PAGE_SIZE;
-    if constexpr (__riscv_xlen == 32)
-        satp |= SATP_SV32;
-    else
-        satp |= SATP_SV39;
+    csr::satp{ next->page_table }.write();
 
     auto kernel_stack = reinterpret_cast<xlen_t>(&next->stack[sizeof(next->stack)]);
 
-    asm volatile(
-        // Switch page table
-        "sfence.vma\n"
-        "csrw satp, %[satp]\n"
-        "sfence.vma\n"
-
-        // Save the kernel stack for the currently executing process for exception handling
-        "csrw sscratch, %[sscratch]\n"
-        :
-        : [satp] "r"(satp), [sscratch] "r"(kernel_stack));
+    // Save the kernel stack for the currently executing process for exception handling
+    asm volatile("csrw sscratch, %[sscratch]\n"
+                 :
+                 : [sscratch] "r"(kernel_stack));
 
     // Context switch
     process *prev = current_proc;

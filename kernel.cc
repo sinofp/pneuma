@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "common.h"
+#include "csr.h"
 #include "file.h"
 #include "mem.h"
 #include "proc.h"
@@ -20,7 +21,7 @@ file files[FILES_MAX];
 extern "C" void kernel_main() {
     memset(__bss, 0, __bss_end - __bss);
 
-    WRITE_CSR(stvec, reinterpret_cast<xlen_t>(kernel_entry));
+    csr::stvec{ kernel_entry, csr::stvec::Mode::Direct }.write();
 
     printf("\n\nhello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)

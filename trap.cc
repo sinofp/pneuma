@@ -1,4 +1,5 @@
 #include "trap.h"
+#include "csr.h"
 #include "file.h"
 #include "proc.h"
 
@@ -166,12 +167,12 @@ void handle_syscall(trap_frame *f) {
 }
 
 extern "C" void handle_trap(trap_frame *f) {
-    // sxlen_t?
-    auto scause = static_cast<SCAUSE>(READ_CSR(scause));
-    auto stval = READ_CSR(stval);
-    auto user_pc = READ_CSR(sepc);
+    auto scause = csr::scause::read();
+    auto stval = csr::stval::read();
+    auto user_pc = csr::sepc::read();
 
-    switch (scause) {
+    using SCAUSE = csr::scause_enc;
+    switch (scause.encoding()) {
     case SCAUSE::UEcall:
         handle_syscall(f);
         // Advance an instruction to skip the ecall
@@ -197,5 +198,5 @@ extern "C" void handle_trap(trap_frame *f) {
         PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
     }
 
-    WRITE_CSR(sepc, user_pc);
+    user_pc.write();
 }
