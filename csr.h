@@ -105,15 +105,34 @@ public:
     inline void write() { asm volatile("csrw stvec, %0" ::"r"(value)); }
 };
 
+enum class sie_enc : sxlen_t {
+    SSIE = 1 << 1,
+    STIE = 1 << 5,
+    SEIE = 1 << 9,
+};
+
+struct sie : reg<sie, sie_enc> {
+    using reg::reg;
+
+    static auto read() {
+        sxlen_t tmp;
+        asm volatile("csrr %0, sie"
+                     : "=r"(tmp));
+        return sie{ tmp };
+    }
+
+    void write() const { asm volatile("csrw sie, %0" ::"r"(value)); }
+};
+
 enum class sstatus_enc : sxlen_t {
     SIE = 1 << 1,  // Supervisor Interrupt Enable
     SPIE = 1 << 5, // Supervisor Previous Interrupt Enable
+    SPP = 1 << 8,  // When an SRET instruction (see Section 3.3.2) is executed to return from the trap handler, the
+                   // privilege level is set to user mode if the SPP bit is 0
     SUM = 1 << 18, // Permit Supervisor User Memory access
 };
 
-// For proc.cc user_entry
-static constexpr sxlen_t USER_SSTATUS =
-    static_cast<sxlen_t>(sstatus_enc::SUM) | static_cast<sxlen_t>(sstatus_enc::SPIE);
+static constexpr sxlen_t USER_SSTATUS = static_cast<sxlen_t>(sstatus_enc::SUM);
 
 struct sstatus : reg<sstatus, sstatus_enc> {
     using reg::reg;
@@ -127,7 +146,7 @@ struct sstatus : reg<sstatus, sstatus_enc> {
 
     void write() const { asm volatile("csrw sstatus, %0" ::"r"(value)); }
 
-    constexpr sxlen_t raw() const { return value; }
+    constexpr V raw() const { return value; }
 };
 
 struct satp {
@@ -160,5 +179,27 @@ public:
                      : "r"(value));
     }
 };
+
+namespace time {
+inline auto read() {
+    if constexpr (__riscv_xlen == 32) {
+        uint32_t hi1, lo, hi2;
+        do {
+            asm volatile("rdtimeh %0"
+                         : "=r"(hi1));
+            asm volatile("rdtime %0"
+                         : "=r"(lo));
+            asm volatile("rdtimeh %0"
+                         : "=r"(hi2));
+        } while (hi1 != hi2); // Retry if overflow during read
+        return (static_cast<uint64_t>(hi2) << 32) | lo;
+    } else {
+        uint64_t t;
+        asm volatile("rdtime %0"
+                     : "=r"(t));
+        return t;
+    }
+}
+} // namespace time
 
 } // namespace csr

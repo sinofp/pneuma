@@ -12,11 +12,15 @@ extern uint8_t __kernel_base[], __free_ram_end[];
 
 [[gnu::naked]]
 void user_entry() {
-    asm volatile("csrw sepc, %[sepc]        \n"
-                 "csrw sstatus, %[sstatus]  \n"
-                 "sret                      \n"
-                 :
-                 : [sepc] "r"(USER_BASE), [sstatus] "r"(csr::USER_SSTATUS));
+    asm volatile(
+        "csrw sepc, %[sepc]        \n"
+        "csrw sstatus, %[sstatus]  \n"
+        "sret                      \n"
+        :
+        : [sepc] "r"(USER_BASE), [sstatus] "r"(csr::sstatus::read()
+                                                   .unset(csr::sstatus_enc::SPP) // Not needed, but I like explicit
+                                                   .set(csr::sstatus_enc::SUM)
+                                                   .raw()));
 }
 
 process *create_process(span<const uint8_t> image) {

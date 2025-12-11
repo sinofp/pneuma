@@ -21,7 +21,7 @@ file files[FILES_MAX];
 extern "C" void kernel_main() {
     memset(__bss, 0, __bss_end - __bss);
 
-    csr::stvec{ kernel_entry, csr::stvec::Mode::Direct }.write();
+    interrupt_init();
 
     printf("\n\nhello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)

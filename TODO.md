@@ -11,7 +11,7 @@ Virtualisation
     - [ ] Hugh pages
 - CPU
   - [ ] Symmetric Multiprocessing
-  - [ ] Replace co-routine by time slices (timer interrupt)
+  - [/] Replace co-routine by time slices (timer interrupt)
   - [ ] Soft float point arthimetic
 
 Concurrency

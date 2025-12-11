@@ -2,6 +2,9 @@
 #include "csr.h"
 #include "file.h"
 #include "proc.h"
+#include "sbi.h"
+
+constexpr uint64_t timer_interrupt_interval = 100000;
 
 // proc.cc
 extern process *idle_proc, *current_proc;
@@ -10,18 +13,34 @@ extern process *idle_proc, *current_proc;
 void kernel_entry() {
     asm volatile(
         // clang-format off
+        // When handling an exception in kernel, we can't use sscratch as our kernel stack because that's not written.
+        // I check Supervisor Previous Privilege (SPP) on wether to use sscrach (saves the kernel_stack for user):
+        // 'When a trap is taken, SPP is set to 0 if the trap originated from user mode, or 1 otherwise.'
+        "addi sp, sp, -%[xlen_size]\n"
+        STORE " t0, (sp)\n"
+        "csrr t0, sstatus\n"
+        // Get SPP: Supervisor Previous Privilege
+        "andi t0, t0, 1 << 8\n"
+        "bnez t0, __from_kernel\n"
+
         // We must not trust the stack pointer at the time of exception.
         // Retrieve the kernel stack of the running process from sscratch.
         "csrrw sp, sscratch, sp\n"
-
         // sp now points to the kernel (not user) stack of the currently running process.
         // sscratch now holds the original value of sp (user stack) at the time of the exception
+        "j __save\n"
 
+        "__from_kernel:"
+        "csrw sscratch, sp\n"
+        // sscratch now holds the original value of sp (kernel stack) at the time of the exception
+
+        "__save:"
         "addi sp, sp, -%[size]\n"
         STORE " ra,  %[ra_offset](sp)\n"
         STORE " gp,  %[gp_offset](sp)\n"
         STORE " tp,  %[tp_offset](sp)\n"
-        STORE " t0,  %[t0_offset](sp)\n"
+        // Remember not to do anything dependent on user t0 when handling trap---I can't see anything requires user t0
+        // STORE " t0,  %[t0_offset](sp)\n"
         STORE " t1,  %[t1_offset](sp)\n"
         STORE " t2,  %[t2_offset](sp)\n"
         STORE " t3,  %[t3_offset](sp)\n"
@@ -60,10 +79,11 @@ void kernel_entry() {
         "mv a0, sp\n"
         "call handle_trap\n"
 
+        "__restore:"
         LOAD " ra,  %[ra_offset](sp)\n"
         LOAD " gp,  %[gp_offset](sp)\n"
         LOAD " tp,  %[tp_offset](sp)\n"
-        LOAD " t0,  %[t0_offset](sp)\n"
+        // LOAD " t0,  %[t0_offset](sp)\n"
         LOAD " t1,  %[t1_offset](sp)\n"
         LOAD " t2,  %[t2_offset](sp)\n"
         LOAD " t3,  %[t3_offset](sp)\n"
@@ -91,6 +111,12 @@ void kernel_entry() {
         LOAD " s10, %[s10_offset](sp)\n"
         LOAD " s11, %[s11_offset](sp)\n"
         LOAD " sp,  %[sp_offset](sp)\n"
+
+        // Restore the real user t0, overwritten because we wanted to load sstatus.SPP
+        LOAD " t0, (sp)\n"
+        STORE " x0, (sp)\n"
+        "addi sp, sp, %[xlen_size]\n"
+
         "sret\n"
         // clang-format on
         :
@@ -109,7 +135,8 @@ void kernel_entry() {
           [s5_offset] "i"(offsetof(trap_frame, s5)), [s6_offset] "i"(offsetof(trap_frame, s6)),
           [s7_offset] "i"(offsetof(trap_frame, s7)), [s8_offset] "i"(offsetof(trap_frame, s8)),
           [s9_offset] "i"(offsetof(trap_frame, s9)), [s10_offset] "i"(offsetof(trap_frame, s10)),
-          [s11_offset] "i"(offsetof(trap_frame, s11)), [sp_offset] "i"(offsetof(trap_frame, sp)));
+          [s11_offset] "i"(offsetof(trap_frame, s11)), [sp_offset] "i"(offsetof(trap_frame, sp)),
+          [xlen_size] "i"(static_cast<xlen_t>(sizeof(xlen_t))));
 }
 
 void handle_syscall(trap_frame *f) {
@@ -166,6 +193,8 @@ void handle_syscall(trap_frame *f) {
     }
 }
 
+inline void set_next_timer_interrupt() { sbi_set_timer(csr::time::read() + timer_interrupt_interval); }
+
 extern "C" void handle_trap(trap_frame *f) {
     auto scause = csr::scause::read();
     auto stval = csr::stval::read();
@@ -177,6 +206,11 @@ extern "C" void handle_trap(trap_frame *f) {
         handle_syscall(f);
         // Advance an instruction to skip the ecall
         user_pc += 4; // Instructions are always 4 bytes, even on RV64
+        user_pc.write();
+        break;
+    case SCAUSE::STimerIntr:
+        set_next_timer_interrupt();
+        printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
         break;
     case SCAUSE::IllegalInst:
         PANIC("Illegal Instruction: stval=0x%lx, sepc=0x%lx\n", stval, user_pc);
@@ -186,8 +220,10 @@ extern "C" void handle_trap(trap_frame *f) {
         PANIC("Address Misaligned: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
     case SCAUSE::LoadAccessFault:
+        PANIC("Load Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
     case SCAUSE::StoreAmoAccessFault:
-        PANIC("Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        PANIC("Store/AMO Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
     case SCAUSE::LoadPageFault:
     case SCAUSE::StoreAmoPageFault:
@@ -197,6 +233,16 @@ extern "C" void handle_trap(trap_frame *f) {
     default:
         PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
     }
+}
 
-    user_pc.write();
+void interrupt_init() {
+    using namespace csr;
+
+    stvec{ kernel_entry, stvec::Mode::Direct }.write();
+
+    // Set next timer interrupt (mtimecmp) before enabling timer interrupt
+    set_next_timer_interrupt();
+
+    sie::read().set(sie_enc::STIE).write();
+    sstatus::read().set(sstatus_enc::SIE).write();
 }

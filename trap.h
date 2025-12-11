@@ -2,7 +2,7 @@
 
 #include "kernel.h"
 
-void kernel_entry();
+void interrupt_init();
 
 using sxlen_t = unsigned long;
 
