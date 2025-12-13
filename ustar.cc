@@ -25,7 +25,7 @@ void fs_init() {
         if (header->name[0] == '\0')
             break;
 
-        if (!strcmp(header->magic, USTAR_MAGIC))
+        if (strcmp(header->magic, USTAR_MAGIC))
             PANIC("invalid tar header: magic=\"%s\"", header->magic);
 
         auto filesz = oct2int(header->size, sizeof(header->size));

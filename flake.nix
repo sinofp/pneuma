@@ -169,6 +169,7 @@
             ./user.h
             ./trap.h
             ./csr.h
+            ./plic.h
           ];
           linkerScripts = [
             ./user.ld

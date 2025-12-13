@@ -4,24 +4,25 @@
 
 void virtio_blk_init();
 void read_write_disk(void *, uint64_t, int);
+// void virtio_blk_intr();
 
 constexpr size_t SECTOR_SIZE = 512;
 constexpr size_t VIRTQ_ENTRY_NUM = 16;
 constexpr uint32_t VIRTIO_DEVICE_BLK = 2;
 
 constexpr paddr_t VIRTIO_BLK_PADDR = 0x10001000;
-constexpr size_t VIRTIO_REG_MAGIC = 0x00;
-constexpr size_t VIRTIO_REG_VERSION = 0x04;
-constexpr size_t VIRTIO_REG_DEVICE_ID = 0x08;
-constexpr size_t VIRTIO_REG_QUEUE_SEL = 0x30;
-constexpr size_t VIRTIO_REG_QUEUE_NUM_MAX = 0x34;
-constexpr size_t VIRTIO_REG_QUEUE_NUM = 0x38;
-constexpr size_t VIRTIO_REG_QUEUE_ALIGN = 0x3c;
-constexpr size_t VIRTIO_REG_QUEUE_PFN = 0x40;
-constexpr size_t VIRTIO_REG_QUEUE_READY = 0x44;
-constexpr size_t VIRTIO_REG_QUEUE_NOTIFY = 0x50;
-constexpr size_t VIRTIO_REG_DEVICE_STATUS = 0x70;
-constexpr size_t VIRTIO_REG_DEVICE_CONFIG = 0x100;
+constexpr paddr_t VIRTIO_REG_MAGIC = VIRTIO_BLK_PADDR + 0x00;
+constexpr paddr_t VIRTIO_REG_VERSION = VIRTIO_BLK_PADDR + 0x04;
+constexpr paddr_t VIRTIO_REG_DEVICE_ID = VIRTIO_BLK_PADDR + 0x08;
+constexpr paddr_t VIRTIO_REG_QUEUE_SEL = VIRTIO_BLK_PADDR + 0x30;
+constexpr paddr_t VIRTIO_REG_QUEUE_NUM_MAX = VIRTIO_BLK_PADDR + 0x34;
+constexpr paddr_t VIRTIO_REG_QUEUE_NUM = VIRTIO_BLK_PADDR + 0x38;
+constexpr paddr_t VIRTIO_REG_QUEUE_ALIGN = VIRTIO_BLK_PADDR + 0x3c;
+constexpr paddr_t VIRTIO_REG_QUEUE_PFN = VIRTIO_BLK_PADDR + 0x40;
+constexpr paddr_t VIRTIO_REG_QUEUE_READY = VIRTIO_BLK_PADDR + 0x44;
+constexpr paddr_t VIRTIO_REG_QUEUE_NOTIFY = VIRTIO_BLK_PADDR + 0x50;
+constexpr paddr_t VIRTIO_REG_DEVICE_STATUS = VIRTIO_BLK_PADDR + 0x70;
+constexpr paddr_t VIRTIO_REG_DEVICE_CONFIG = VIRTIO_BLK_PADDR + 0x100;
 
 constexpr uint32_t VIRTIO_STATUS_ACK = 1;
 constexpr uint32_t VIRTIO_STATUS_DRIVER = 2;

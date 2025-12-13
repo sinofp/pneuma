@@ -31,3 +31,10 @@ using paddr_t = uintptr_t;
 
 // The same for both Sv32 and Sv39
 constexpr size_t PAGE_SIZE = 4096;
+
+namespace mmio {
+// TODO concept to restrict T to uint32_t and uint64_t
+template <typename T> inline auto read(paddr_t addr) { return *reinterpret_cast<volatile T *>(addr); }
+
+template <typename T> inline void write(paddr_t addr, T data) { *reinterpret_cast<volatile T *>(addr) = data; }
+} // namespace mmio

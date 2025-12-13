@@ -1,8 +1,10 @@
 #include "trap.h"
 #include "csr.h"
 #include "file.h"
+#include "plic.h"
 #include "proc.h"
 #include "sbi.h"
+#include "virtio.h"
 
 constexpr uint64_t timer_interrupt_interval = 100000;
 
@@ -200,34 +202,45 @@ extern "C" void handle_trap(trap_frame *f) {
     auto stval = csr::stval::read();
     auto user_pc = csr::sepc::read();
 
-    using SCAUSE = csr::scause_enc;
+    using enum csr::scause_enc;
     switch (scause.encoding()) {
-    case SCAUSE::UEcall:
+    case UEcall:
         handle_syscall(f);
         // Advance an instruction to skip the ecall
         user_pc += 4; // Instructions are always 4 bytes, even on RV64
         user_pc.write();
         break;
-    case SCAUSE::STimerIntr:
+    case STimerIntr:
         set_next_timer_interrupt();
-        printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
+        // printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
         break;
-    case SCAUSE::IllegalInst:
+    case SExternalIntr: {
+        // External interrupt from PLIC
+        if (auto irq = plic::claim(0)) {
+            // if (irq == plic::VIRTIO_BLK_IRQ)
+            //     virtio_blk_intr();
+            // else
+            printf("Unexpected IRQ: %d\n", irq);
+            plic::complete(0, irq);
+        }
+        break;
+    }
+    case IllegalInst:
         PANIC("Illegal Instruction: stval=0x%lx, sepc=0x%lx\n", stval, user_pc);
         break;
-    case SCAUSE::LoadAddrMisaligned:
-    case SCAUSE::StoreAmoAddrMisaligned:
+    case LoadAddrMisaligned:
+    case StoreAmoAddrMisaligned:
         PANIC("Address Misaligned: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
-    case SCAUSE::LoadAccessFault:
+    case LoadAccessFault:
         PANIC("Load Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
-    case SCAUSE::StoreAmoAccessFault:
+    case StoreAmoAccessFault:
         PANIC("Store/AMO Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
-    case SCAUSE::LoadPageFault:
-    case SCAUSE::StoreAmoPageFault:
-    case SCAUSE::InstPageFault:
+    case LoadPageFault:
+    case StoreAmoPageFault:
+    case InstPageFault:
         PANIC("Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
     default:
@@ -243,6 +256,10 @@ void interrupt_init() {
     // Set next timer interrupt (mtimecmp) before enabling timer interrupt
     set_next_timer_interrupt();
 
-    sie::read().set(sie_enc::STIE).write();
+    // Initialize PLIC for external interrupts
+    plic::init();
+
+    // Enable supervisor timer and external interrupts
+    sie::read().set(sie_enc::STIE).set(sie_enc::SEIE).write();
     sstatus::read().set(sstatus_enc::SIE).write();
 }

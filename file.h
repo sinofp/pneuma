@@ -37,6 +37,6 @@ struct file {
 
 constexpr size_t FILES_MAX = 3;
 constexpr size_t DISK_MAX_SIZE = align_up(sizeof(file) * FILES_MAX, SECTOR_SIZE);
-constexpr char USTAR_MAGIC[] = "magic=\"ustar\"";
+constexpr char USTAR_MAGIC[] = "ustar";
 
 extern file files[FILES_MAX];

@@ -32,12 +32,15 @@ extern "C" void kernel_main() {
     printf("alloc_pages test: paddr0=0x%lx\n", paddr0);
     printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
-    virtio_blk_init();
-    fs_init();
-
     idle_proc = create_process({ nullptr, 0 });
     idle_proc->pid = 0; // idle
     current_proc = idle_proc;
+
+    // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
+    // Therefore it must be placed after idel_proc = create_process, otherwise we'll have
+    // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
+    virtio_blk_init();
+    fs_init();
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
     printf("_binary_shell_bin_start is 0x%lx\n", _binary_shell_bin_start);
@@ -46,7 +49,12 @@ extern "C" void kernel_main() {
     create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
 
     yield();
-    PANIC("switched to idle process");
+
+    for (;;) {
+        printf("switched to idle process\n");
+        asm("wfi");
+        yield();
+    }
 }
 
 [[using gnu: section(".text.boot"), naked]]

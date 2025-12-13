@@ -9,6 +9,7 @@ enum class ProcState {
     UNUSED,
     RUNNABLE,
     EXITED,
+    BLOCKED,
 };
 
 struct process {

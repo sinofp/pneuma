@@ -1,6 +1,7 @@
 #include "proc.h"
 #include "csr.h"
 #include "mem.h"
+#include "plic.h"
 #include "virtio.h"
 
 process procs[PROCS_MAX]; // All process control structures.
@@ -56,6 +57,10 @@ process *create_process(span<const uint8_t> image) {
 
     // Map virtio-block MMIO
     map_page(page_table, VIRTIO_BLK_PADDR, VIRTIO_BLK_PADDR, PAGE_R | PAGE_W);
+
+    // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
+    for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
+        map_page(page_table, plic_addr, plic_addr, PAGE_R | PAGE_W);
 
     // Map user pages.
     for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
