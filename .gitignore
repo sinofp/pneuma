@@ -4,3 +4,4 @@
 *.log
 *.tar
 result-*
+compile_commands.json

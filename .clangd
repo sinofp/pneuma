@@ -1,0 +1,16 @@
+CompileFlags:
+  CompilationDatabase: .
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    Add:
+      - modernize-*
+      - bugprone-*
+      - performance-*
+    Remove:
+      - modernize-avoid-c-arrays
+
+Index:
+  Background: Build

@@ -230,6 +230,34 @@
                   ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} $out/shell.bin.o
               '';
 
+          # Helper function to generate compile_commands.json for clangd
+          mkCompileCommands =
+            arch:
+            let
+              cfg = archConfigs.${arch};
+              pie = if arch == "riscv64" then "-fPIE" else "";
+              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+
+              # All unique source files (just basenames)
+              allSources = pkgs.lib.unique (kernelSources ++ userSources);
+
+              # Generate a compile command entry for each source file
+              # Use current directory (.) which clangd will resolve relative to compile_commands.json location
+              mkEntry = src: {
+                directory = ".";
+                command = "${clang} ${ccflags} -c ${basename src}";
+                file = "${basename src}";
+              };
+
+              entries = map mkEntry allSources;
+              jsonContent = builtins.toJSON entries;
+
+            in
+            pkgs.writeTextFile {
+              name = "compile_commands.json";
+              text = jsonContent;
+            };
+
           # Build both architectures
           build32 = mkKernel "riscv32";
           build64 = mkKernel "riscv64";
@@ -239,6 +267,8 @@
           rv32 = build32;
           rv64 = build64;
           default = build32;
+
+          compile-commands = mkCompileCommands "riscv64";
         }
       );
     };
