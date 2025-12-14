@@ -31,7 +31,7 @@ constexpr vaddr_t USER_BASE = 0x1000000;
 process *create_process(span<const uint8_t> image);
 void yield();
 
-struct [[gnu::packed]] callee_saved_regs {
+struct [[gnu::packed]] reg_ctx {
     xlen_t ra;
     xlen_t s0;
     xlen_t s1;

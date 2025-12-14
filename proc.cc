@@ -40,9 +40,9 @@ process *create_process(span<const uint8_t> image) {
     // Stack callee-saved registers. These register values will be restored in
     // the first context switch in switch_context.
     auto *sp = reinterpret_cast<decltype(proc->sp)>(&proc->stack[sizeof(proc->stack)]); // the stack grows downward
-    // Make space for callee_saved_regs. The number of registers of RV32 and RV64 are the same
-    constexpr size_t stack_length = sizeof(callee_saved_regs) / sizeof(xlen_t);
-    static_assert(13 == stack_length, "callee_saved_regs size donesn't equal to the number of regs");
+    // Make space for reg_ctx. The number of registers of RV32 and RV64 are the same
+    constexpr size_t stack_length = sizeof(reg_ctx) / sizeof(xlen_t);
+    static_assert(13 == stack_length, "reg_ctx size donesn't equal to the number of regs");
     sp -= stack_length;
     *sp = reinterpret_cast<xlen_t>(user_entry); // std::remove_pointer?
 
@@ -91,6 +91,7 @@ void switch_context(T *prev_sp, T next_sp) {
         // clang-format off
         // Save callee-saved registers onto the current process's stack.
         "addi sp, sp, -%[size]\n"
+        // This ra is the return address back into the caller (yield)
         STORE " ra,  %[ra_offset](sp)\n"
         STORE " s0,  %[s0_offset](sp)\n"
         STORE " s1,  %[s1_offset](sp)\n"
@@ -110,6 +111,7 @@ void switch_context(T *prev_sp, T next_sp) {
         "mv sp, a1\n"       // Switch stack pointer (sp) here
 
         // Restore callee-saved registers from the next process's stack.
+        // Loads the return address of next process (its yield)
         LOAD " ra,  %[ra_offset](sp)\n"
         LOAD " s0,  %[s0_offset](sp)\n"
         LOAD " s1,  %[s1_offset](sp)\n"
@@ -124,16 +126,18 @@ void switch_context(T *prev_sp, T next_sp) {
         LOAD " s10, %[s10_offset](sp)\n"
         LOAD " s11, %[s11_offset](sp)\n"
         "addi sp, sp, %[size]\n" // Pop restored registers from stack
+
+        // Return to next process' caller (pc = ra)
         "ret\n"
         // clang-format on
         :
-        : [size] "i"(static_cast<xlen_t>(sizeof(callee_saved_regs))), [ra_offset] "i"(offsetof(callee_saved_regs, ra)),
-          [s0_offset] "i"(offsetof(callee_saved_regs, s0)), [s1_offset] "i"(offsetof(callee_saved_regs, s1)),
-          [s2_offset] "i"(offsetof(callee_saved_regs, s2)), [s3_offset] "i"(offsetof(callee_saved_regs, s3)),
-          [s4_offset] "i"(offsetof(callee_saved_regs, s4)), [s5_offset] "i"(offsetof(callee_saved_regs, s5)),
-          [s6_offset] "i"(offsetof(callee_saved_regs, s6)), [s7_offset] "i"(offsetof(callee_saved_regs, s7)),
-          [s8_offset] "i"(offsetof(callee_saved_regs, s8)), [s9_offset] "i"(offsetof(callee_saved_regs, s9)),
-          [s10_offset] "i"(offsetof(callee_saved_regs, s10)), [s11_offset] "i"(offsetof(callee_saved_regs, s11)));
+        : [size] "i"(static_cast<xlen_t>(sizeof(reg_ctx))), [ra_offset] "i"(offsetof(reg_ctx, ra)),
+          [s0_offset] "i"(offsetof(reg_ctx, s0)), [s1_offset] "i"(offsetof(reg_ctx, s1)),
+          [s2_offset] "i"(offsetof(reg_ctx, s2)), [s3_offset] "i"(offsetof(reg_ctx, s3)),
+          [s4_offset] "i"(offsetof(reg_ctx, s4)), [s5_offset] "i"(offsetof(reg_ctx, s5)),
+          [s6_offset] "i"(offsetof(reg_ctx, s6)), [s7_offset] "i"(offsetof(reg_ctx, s7)),
+          [s8_offset] "i"(offsetof(reg_ctx, s8)), [s9_offset] "i"(offsetof(reg_ctx, s9)),
+          [s10_offset] "i"(offsetof(reg_ctx, s10)), [s11_offset] "i"(offsetof(reg_ctx, s11)));
 }
 
 void yield() {

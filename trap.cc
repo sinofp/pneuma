@@ -119,6 +119,9 @@ void kernel_entry() {
         STORE " x0, (sp)\n"
         "addi sp, sp, %[xlen_size]\n"
 
+        // pc = sepc
+        // sstatus.SIE = sstatus.SPIE
+        // Mode = sstatus.SPP
         "sret\n"
         // clang-format on
         :
