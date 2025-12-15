@@ -3,23 +3,29 @@
 #include "kernel.h"
 #include "span.h"
 
-constexpr size_t PROCS_MAX = 8; // Maximum number of processes
+using pid_t = uint16_t;        // >= log2(PROCS_MAX)
+constexpr pid_t PROCS_MAX = 8; // Maximum number of processes
 
 enum class ProcState {
     UNUSED,
-    RUNNABLE,
-    EXITED,
-    BLOCKED,
+    SUSPENDED,
+    READY,
+    RUNNING,
 };
 
 struct process {
-    size_t pid;      // Process ID
+    pid_t pid;       // Process ID
     ProcState state; // Process state
+    int32_t prio;
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
                 // be a vaddr_t *.
     uint8_t stack[8192]; // Kernel stack
     paddr_t *page_table; // Page table for this process
 };
+
+extern process procs[];
+
+inline bool bad_pid(pid_t id) { return id < 0 or PROCS_MAX <= id or ProcState::UNUSED == procs[id].state; }
 
 constexpr xlen_t SATP_SV32 = 1u << 31;
 constexpr xlen_t SATP_SV39 = 8ull << 60;
@@ -30,6 +36,11 @@ constexpr vaddr_t USER_BASE = 0x1000000;
 
 process *create_process(span<const uint8_t> image);
 void yield();
+void suspend(process *, bool = true);
+void resume(process *, bool = true);
+void ready(process *, bool = true);
+
+void reschedule();
 
 struct [[gnu::packed]] reg_ctx {
     xlen_t ra;

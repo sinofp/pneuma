@@ -6,7 +6,7 @@
 #include "sbi.h"
 #include "virtio.h"
 
-constexpr uint64_t timer_interrupt_interval = 100000;
+constexpr uint64_t timer_interrupt_interval = 1000; // 100000;
 
 // proc.cc
 extern process *idle_proc, *current_proc;
@@ -218,7 +218,7 @@ extern "C" void handle_trap(trap_frame *f) {
         break;
     case STimerIntr:
         set_next_timer_interrupt();
-        // printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
+        printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
         break;
     case SExternalIntr: {
         // External interrupt from PLIC
@@ -257,6 +257,7 @@ extern "C" void handle_trap(trap_frame *f) {
 void interrupt_init() {
     using namespace csr;
 
+    // This is super important, without setting stvec, sret won't take us to sepc.
     stvec{ kernel_entry, stvec::Mode::Direct }.write();
 
     // Set next timer interrupt (mtimecmp) before enabling timer interrupt

@@ -9,6 +9,7 @@ Virtualisation
   - [ ] Free pages
   - [ ] Use tree representation for paging
     - [ ] Hugh pages
+  - [ ] Pseudo call to pass arguments to user proc, and user_ret to kill the proc
 - CPU
   - [ ] Symmetric Multiprocessing
   - [/] Replace co-routine by time slices (timer interrupt)

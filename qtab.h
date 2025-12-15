@@ -1,0 +1,126 @@
+#pragma once
+
+#include "kernel.h"
+#include "optional.h"
+#include "proc.h"
+
+using qkey_t = int32_t; // Use int for minus MINKEY TODO better approach
+using qid_t = pid_t;    // Since the index is pid
+
+// TODO consider removing it because we don't rely on this special value for empty()
+constexpr qid_t EMPTY = -1;
+constexpr qkey_t MAXKEY = 0x7FFFFFFF;
+constexpr qkey_t MINKEY = 0x80000000;
+
+constexpr size_t NQUEUES = 1;                       // # of different queues (ready, sleep, etc.)
+constexpr size_t NQENT = PROCS_MAX + (NQUEUES * 2); // * 2 for head & tail
+constexpr qid_t READY_QUEUE = PROCS_MAX;
+
+struct qent {
+    qkey_t key;
+    qid_t next;
+    qid_t prev;
+};
+
+// I must declare it here for queue_view inline methods.
+// I might make the methods non-inline because I don't want other source files able to access qtab directly.
+extern qent qtab[];
+
+void queue_init();
+
+// 'Different' queues that uses qtab
+class queue_view {
+    qid_t q;
+
+    constexpr qid_t head_id() const { return q; }
+
+    constexpr qid_t tail_id() const { return q + 1; }
+
+    qid_t first_id() const { return qtab[head_id()].next; }
+
+    // TODO remove?
+    // qid_t last_id() const { return qtab[tail_id()].prev; }
+public:
+    explicit constexpr queue_view(qid_t id)
+        : q(id) {}
+
+    // Queue is empty if first entry points to something >= PROCS_MAX (i.e., tail)
+    bool empty() const { return first_id() >= static_cast<qid_t>(PROCS_MAX); }
+
+    qkey_t first_key() const { return qtab[first_id()].key; }
+
+    // Insert at the end.
+    // This method is only used for FIFO queues, so we ignore their key (priority)
+    inline optional<pid_t> enqueue(pid_t pid) {
+        if (bad_pid(pid)) {
+            return nullopt;
+        }
+
+        auto tail = tail_id();
+        auto prev = qtab[tail].prev;
+
+        qtab[pid].next = tail;
+        qtab[pid].prev = prev;
+
+        qtab[prev].next = pid;
+        qtab[tail].prev = pid;
+
+        return pid;
+    }
+
+    inline optional<qid_t> dequeue() {
+        if (empty()) {
+            return nullopt;
+        }
+
+        auto pid = first_id();
+
+        auto second_id = qtab[pid].next;
+        qtab[head_id()].next = second_id;
+        qtab[second_id].prev = head_id();
+
+        // TODO remove?
+        qtab[pid] = { 0, EMPTY, EMPTY };
+
+        return pid;
+    }
+
+    // Insert in descending order
+    inline optional<pid_t> insert(pid_t pid, qkey_t key) {
+        if (bad_pid(pid)) {
+            return nullopt;
+        }
+
+        qid_t next;
+        // Xinu book: 'The loop must eventually terminate because the key of the tail element contains a value less than
+        // the smallest valid key'
+        // Keep = in <= to preserve insertion order when the priority is the same.
+        // I removed it because I don't have chprio, and I want to switch to a non-idle process
+        // for (next = first_id(); key <= qtab[next].key; next = qtab[next].next) {
+        for (next = first_id(); key < qtab[next].key; next = qtab[next].next) {
+        }
+
+        // Insert the new element between prev and next
+        auto prev = qtab[next].prev;
+
+        qtab[pid] = { key, next, prev };
+
+        qtab[prev].next = qtab[next].prev = pid;
+
+        return pid;
+    }
+
+    inline optional<pid_t> remove(pid_t pid) {
+        if (bad_pid(pid)) {
+            return nullopt;
+        }
+        auto next = qtab[pid].next;
+        auto prev = qtab[pid].prev;
+        qtab[prev].next = next;
+        qtab[next].prev = prev;
+
+        return pid;
+    }
+};
+
+constexpr queue_view ready_queue() { return queue_view(READY_QUEUE); }

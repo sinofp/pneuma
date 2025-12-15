@@ -4,6 +4,7 @@
 #include "file.h"
 #include "mem.h"
 #include "proc.h"
+#include "qtab.h"
 #include "sbi.h"
 #include "trap.h"
 #include "virtio.h"
@@ -23,6 +24,7 @@ file files[FILES_MAX];
 extern "C" void kernel_main() {
     memset(__bss, 0, __bss_end - __bss);
 
+    queue_init();
     interrupt_init();
 
     printf("\n\nhello %s\n", "world!");
@@ -35,28 +37,33 @@ extern "C" void kernel_main() {
     printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
     idle_proc = create_process({ nullptr, 0 });
-    idle_proc->pid = 0; // idle
+    // idle_proc->pid = 0; // idle
     current_proc = idle_proc;
+    printf("Process created: idle (%d)\n", idle_proc->pid);
 
     // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
     // Therefore it must be placed after idel_proc = create_process, otherwise we'll have
     // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
-    virtio_blk_init();
-    fs_init();
+    // virtio_blk_init();
+    // fs_init();
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
 
     // Create user processes
-    printf("Creating user-a process\n");
-    create_process({ _binary_user_a_bin_start, reinterpret_cast<size_t>(_binary_user_a_bin_size) });
+    auto *proc_a = create_process({ _binary_user_a_bin_start, reinterpret_cast<size_t>(_binary_user_a_bin_size) });
+    printf("Process created: user-a (%d)\n", proc_a->pid);
 
-    printf("Creating user-b process\n");
-    create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
+    auto *proc_b = create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
+    printf("Process created: user-b (%d)\n", proc_b->pid);
 
     // printf("Creating shell process\n");
     // create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
 
-    yield();
+    // yield();
+    suspend(idle_proc, false);
+    resume(proc_a, false);
+    resume(proc_b, false);
+    reschedule();
 
     for (int i = 0; i < 5; ++i) {
         printf("switched to idle process\n");

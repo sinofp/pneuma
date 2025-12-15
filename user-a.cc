@@ -1,8 +1,8 @@
 #include "user.h"
 
 extern "C" void main(void) {
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 100; ++i) {
         putchar('A');
-        yield();
+        // yield();
     }
 }

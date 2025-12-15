@@ -86,6 +86,7 @@
               # Unwrapped LLVM/clang for bare-metal RISC-V development
               llvmPackages_latest.clang-unwrapped
               llvmPackages_latest.bintools-unwrapped # includes lld, llvm-nm, llvm-objdump, etc.
+              gdb-dashboard
               opensbi
               ubootQemu
               (qemu.override {
@@ -151,6 +152,7 @@
             ./virtio-blk.cc
             ./ustar.cc
             ./trap.cc
+            ./qtab.cc
           ];
           shellSources = [
             ./user.cc
@@ -180,6 +182,7 @@
             ./trap.h
             ./csr.h
             ./plic.h
+            ./qtab.h
             ./optional.h
           ];
           linkerScripts = [
@@ -202,7 +205,7 @@
               cfg = archConfigs.${arch};
               # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
               pie = if arch == "riscv64" then "-fPIE" else "";
-              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+              ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie}";
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
