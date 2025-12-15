@@ -14,6 +14,7 @@ constexpr decltype(sbiret::error) SBI_SUCCESS = 0;
 enum class EID : xlen_t {
     DBCN = 0x4442434E,
     TIME = 0x54494D45,
+    SRST = 0x53525354,
 };
 
 // Many function arguments in SBI spec are defined as unsigned long.
@@ -68,4 +69,10 @@ void sbi_set_timer(uint64_t stime_value) {
         auto lo = static_cast<xlen_t>(stime_value);
         sbi_call(lo, hi, 0, 0, 0, 0, 0, EID::TIME);
     }
+}
+
+// System reset (FID #0) struct sbiret sbi_system_reset(uint32_t reset_type, uint32_t reset_reason)
+[[noreturn]]
+void shutdown() {
+    sbi_call(0, 0, 0, 0, 0, 0, 0, EID::SRST);
 }

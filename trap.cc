@@ -161,7 +161,7 @@ void handle_syscall(trap_frame *f) {
         break;
     case SYS_EXIT:
         printf("process %d exited\n", current_proc->pid);
-        current_proc->state = ProcState::EXITED;
+        current_proc->state = ProcState::UNUSED;
         // TODO free resources of exited proc
         yield();
         PANIC("unreachable");
@@ -193,6 +193,9 @@ void handle_syscall(trap_frame *f) {
         f->a0 = len;
         break;
     } break;
+    case SYS_YIELD:
+        yield();
+        break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }

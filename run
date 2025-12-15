@@ -60,6 +60,8 @@ nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
 local shell_elf=result-$arch/shell.elf
+local user_a_elf=result-$arch/user-a.elf
+local user_b_elf=result-$arch/user-b.elf
 
 # U-Boot is only available for RV64
 if [[ $use_uboot == true && $arch != rv64 ]] {
@@ -109,6 +111,8 @@ if [[ $debug == true ]] {
         lldb $kernel_elf \
           -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
           -o 'image add $shell_elf' \
+          -o 'image add $user_a_elf' \
+          -o 'image add $user_b_elf' \
           -o 'gdb-remote localhost:1234'
     " >/dev/null # Ignores pane-id because it'll be closed when exiting LLDB
 

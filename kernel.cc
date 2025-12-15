@@ -10,8 +10,10 @@
 
 extern uint8_t __bss[], __bss_end[], __stack_top[];
 
-// shell.bin.o
+// Embedded user program binaries (from *.bin.o files)
 extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
+extern uint8_t _binary_user_a_bin_start[], _binary_user_a_bin_size[];
+extern uint8_t _binary_user_b_bin_start[], _binary_user_b_bin_size[];
 
 // proc.cc
 extern process *idle_proc, *current_proc;
@@ -43,18 +45,27 @@ extern "C" void kernel_main() {
     fs_init();
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
-    printf("_binary_shell_bin_start is 0x%lx\n", _binary_shell_bin_start);
-    printf("_binary_shell_bin_size is 0x%lx\n", _binary_shell_bin_size);
-    printf("About to create shell\n");
-    create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
+
+    // Create user processes
+    printf("Creating user-a process\n");
+    create_process({ _binary_user_a_bin_start, reinterpret_cast<size_t>(_binary_user_a_bin_size) });
+
+    printf("Creating user-b process\n");
+    create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
+
+    // printf("Creating shell process\n");
+    // create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
 
     yield();
 
-    for (;;) {
+    for (int i = 0; i < 5; ++i) {
         printf("switched to idle process\n");
         asm("wfi");
         yield();
     }
+
+    printf("I'm going to bed, bye.\n");
+    shutdown();
 }
 
 [[using gnu: section(".text.boot"), naked]]

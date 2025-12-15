@@ -38,5 +38,6 @@ constexpr unsigned long SYS_GETCHAR = 2;
 constexpr unsigned long SYS_EXIT = 3;
 constexpr unsigned long SYS_READFILE = 4;
 constexpr unsigned long SYS_WRITEFILE = 5;
+constexpr unsigned long SYS_YIELD = 6;
 
 constexpr int EOF = -1;

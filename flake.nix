@@ -152,10 +152,20 @@
             ./ustar.cc
             ./trap.cc
           ];
-          userSources = [
+          shellSources = [
             ./user.cc
             ./common.cc
             ./shell.cc
+          ];
+          userASources = [
+            ./user.cc
+            ./common.cc
+            ./user-a.cc
+          ];
+          userBSources = [
+            ./user.cc
+            ./common.cc
+            ./user-b.cc
           ];
           headers = [
             ./kernel.h
@@ -170,6 +180,7 @@
             ./trap.h
             ./csr.h
             ./plic.h
+            ./optional.h
           ];
           linkerScripts = [
             ./user.ld
@@ -177,7 +188,9 @@
           ];
 
           # All source files with duplicates removed
-          allSourcePaths = pkgs.lib.unique (kernelSources ++ userSources ++ headers ++ linkerScripts);
+          allSourcePaths = pkgs.lib.unique (
+            kernelSources ++ shellSources ++ userASources ++ userBSources ++ headers ++ linkerScripts
+          );
 
           # Helper to get just the filename from a path
           basename = path: builtins.baseNameOf (toString path);
@@ -210,7 +223,7 @@
                   -Wl,-Tuser.ld \
                   -Wl,-Map=$out/shell.map \
                   -o $out/shell.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename userSources)}
+                  ${pkgs.lib.concatStringsSep " " (map basename shellSources)}
 
                 # Convert shell.elf to binary
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
@@ -221,13 +234,48 @@
                 ${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o
                 popd
 
-                # Build kernel.elf with embedded shell
+                # Build user-a.elf (for debugging symbols)
+                ${clang} ${ccflags} \
+                  --ld-path=${lld} \
+                  -Wl,-Tuser.ld \
+                  -Wl,-Map=$out/user-a.map \
+                  -o $out/user-a.elf \
+                  ${pkgs.lib.concatStringsSep " " (map basename userASources)}
+
+                # Convert user-a.elf to binary
+                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+                  $out/user-a.elf $out/user-a.bin
+
+                # Convert binary to ELF object
+                pushd $out
+                ${objcopy} -I binary -O ${cfg.elfFormat} user-a.bin user-a.bin.o
+                popd
+
+                # Build user-b.elf (for debugging symbols)
+                ${clang} ${ccflags} \
+                  --ld-path=${lld} \
+                  -Wl,-Tuser.ld \
+                  -Wl,-Map=$out/user-b.map \
+                  -o $out/user-b.elf \
+                  ${pkgs.lib.concatStringsSep " " (map basename userBSources)}
+
+                # Convert user-b.elf to binary
+                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
+                  $out/user-b.elf $out/user-b.bin
+
+                # Convert binary to ELF object
+                pushd $out
+                ${objcopy} -I binary -O ${cfg.elfFormat} user-b.bin user-b.bin.o
+                popd
+
+                # Build kernel.elf with embedded user programs
                 ${clang} ${ccflags} \
                   --ld-path=${lld} \
                   -Wl,-Tkernel.ld \
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} $out/shell.bin.o
+                  ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} \
+                  $out/shell.bin.o $out/user-a.bin.o $out/user-b.bin.o
               '';
 
           # Helper function to generate compile_commands.json for clangd
@@ -239,7 +287,7 @@
               ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
 
               # All unique source files (just basenames)
-              allSources = pkgs.lib.unique (kernelSources ++ userSources);
+              allSources = pkgs.lib.unique (kernelSources ++ shellSources ++ userASources ++ userBSources);
 
               # Generate a compile command entry for each source file
               # Use current directory (.) which clangd will resolve relative to compile_commands.json location
