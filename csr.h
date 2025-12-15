@@ -202,4 +202,26 @@ inline auto read() {
 }
 } // namespace time
 
+class intr_guard {
+    sstatus prev_sstatus;
+
+public:
+    explicit intr_guard()
+        : prev_sstatus{ sstatus::read() } {
+        // Disable interrupts
+        // unset don't modify the sstatus.value, so we still save the previous value.
+        prev_sstatus.unset(sstatus_enc::SIE).write();
+    }
+
+    ~intr_guard() {
+        // Restore, rather than enable interrupts
+        // Only restoring ensuring us not turning interrupts on when it was originally off
+        prev_sstatus.write();
+    }
+
+    // Disable copy ctor to make sure we only manage interrupts in one instance
+    intr_guard(const intr_guard &) = delete;
+    intr_guard &operator=(const intr_guard &) = delete;
+};
+
 } // namespace csr
