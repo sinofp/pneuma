@@ -1,5 +1,6 @@
 #include "proc.h"
 #include "csr.h"
+#include "debug.h"
 #include "mem.h"
 #include "plic.h"
 #include "qtab.h"
@@ -13,10 +14,15 @@ process *idle_proc;    // Idle process
 extern uint8_t __kernel_base[], __free_ram_end[];
 
 using enum ProcState;
-using enum csr::sstatus_enc;
 
-[[gnu::naked]]
+// We only execute this function at the beginning of a user process.
+// So we don't care the 'restored' registers, because they're all placeholders allocated in create_process,
+// only saved and loaded to use the same context_switch for process already running.
+// Therefore, this function don't have to be naked, like we don't have to zero the callee saved registers for new
+// process in create_process
+// What's more, "r" already overwrites a register to load USER_BASE.
 void user_entry() {
+    using enum csr::sstatus_enc;
     asm volatile("csrw sepc, %[sepc]        \n"
                  "csrw sstatus, %[sstatus]  \n"
                  "sret                      \n"
@@ -48,9 +54,8 @@ process *create_process(span<const uint8_t> image) {
     static_assert(13 == stack_length, "reg_ctx size donesn't equal to the number of regs");
     sp -= stack_length;
 
-    // Zero-initialize the entire reg_ctx to avoid garbage values in s0-s11
     auto *ctx = reinterpret_cast<reg_ctx *>(sp);
-    *ctx = {}; // Zero-initialize all fields
+    // *ctx = {};
     ctx->ra = reinterpret_cast<xlen_t>(user_entry);
 
     // Identical mapping for kernel pages, prepared for user's syscalls.
@@ -215,11 +220,17 @@ void resume(process *proc, bool instant) {
 void reschedule() {
     csr::intr_guard g;
 
+    // printf("reschedule: current_proc->pid is %d\n", current_proc->pid);
+    // print_procs();
+    // print_readyq();
+
+    auto readyq = ready_queue();
+
     // The caller is supposed to change the state if needed
     // If it's still running, we only switch if a higher priority process is ready
-    auto readyq = ready_queue();
     if (RUNNING == current_proc->state) {
-        if (current_proc->prio > readyq.first_key())
+        // MLFQ rule 1: Keep executing if current priority is the highest
+        if (readyq.first_key() < current_proc->prio)
             return;
 
         current_proc->state = READY;
@@ -246,9 +257,9 @@ void reschedule() {
     process *prev = current_proc;
     current_proc = next;
     current_proc->state = RUNNING;
-    printf("reschedule: Switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
-           reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
+    // printf("reschedule: Switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
+    //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
     switch_context(&prev->sp, next->sp);
-    printf("reschedule: Returned from switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
-           reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
+    // printf("reschedule: Returned from switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
+    //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
 }

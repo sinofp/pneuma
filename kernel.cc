@@ -44,8 +44,8 @@ extern "C" void kernel_main() {
     // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
     // Therefore it must be placed after idel_proc = create_process, otherwise we'll have
     // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
-    // virtio_blk_init();
-    // fs_init();
+    virtio_blk_init();
+    fs_init();
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
 
@@ -61,15 +61,18 @@ extern "C" void kernel_main() {
 
     // yield();
     suspend(idle_proc, false);
+    idle_proc->prio = 0;
+    resume(idle_proc, false);
     resume(proc_a, false);
     resume(proc_b, false);
     reschedule();
 
-    for (int i = 0; i < 5; ++i) {
-        printf("switched to idle process\n");
-        asm("wfi");
-        yield();
-    }
+    // for (int i = 0; i < 5; ++i) {
+    //     printf("switched to idle process\n");
+    //     asm("wfi");
+    //     // yield();
+    //     reschedule();
+    // }
 
     printf("I'm going to bed, bye.\n");
     shutdown();

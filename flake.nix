@@ -184,6 +184,7 @@
             ./plic.h
             ./qtab.h
             ./optional.h
+            ./debug.h
           ];
           linkerScripts = [
             ./user.ld

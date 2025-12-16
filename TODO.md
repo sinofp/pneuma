@@ -4,7 +4,7 @@ Virtualisation
   - [ ] virtio-gpu
   - [ ] virtio-net
   - virtio-blk
-    - [ ] Remove busy-waiting
+    - [/] Remove busy-waiting
 - Memory
   - [ ] Free pages
   - [ ] Use tree representation for paging
@@ -12,7 +12,7 @@ Virtualisation
   - [ ] Pseudo call to pass arguments to user proc, and user_ret to kill the proc
 - CPU
   - [ ] Symmetric Multiprocessing
-  - [/] Replace co-routine by time slices (timer interrupt)
+  - [x] Replace co-routine by time slices (timer interrupt)
   - [ ] Soft float point arthimetic
 
 Concurrency

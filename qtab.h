@@ -36,15 +36,35 @@ class queue_view {
 
     constexpr qid_t tail_id() const { return q + 1; }
 
+public:
     qid_t first_id() const { return qtab[head_id()].next; }
 
     // TODO remove?
     // qid_t last_id() const { return qtab[tail_id()].prev; }
-public:
+
     explicit constexpr queue_view(qid_t id)
         : q(id) {}
 
+    // For range-based for loop
+    struct iterator {
+        qid_t curr;
+
+        const qent &operator*() const { return qtab[curr]; }
+
+        iterator &operator++() {
+            curr = qtab[curr].next;
+            return *this;
+        }
+
+        bool operator!=(qid_t sentinel) const { return curr != sentinel; }
+    };
+
+    iterator begin() const { return iterator{ first_id() }; }
+
+    qid_t end() const { return tail_id(); }
+
     // Queue is empty if first entry points to something >= PROCS_MAX (i.e., tail)
+    // TODO change it to first_id() == tail_id()?
     bool empty() const { return first_id() >= static_cast<qid_t>(PROCS_MAX); }
 
     qkey_t first_key() const { return qtab[first_id()].key; }
@@ -96,8 +116,8 @@ public:
         // the smallest valid key'
         // Keep = in <= to preserve insertion order when the priority is the same.
         // I removed it because I don't have chprio, and I want to switch to a non-idle process
-        // for (next = first_id(); key <= qtab[next].key; next = qtab[next].next) {
-        for (next = first_id(); key < qtab[next].key; next = qtab[next].next) {
+        for (next = first_id(); key <= qtab[next].key; next = qtab[next].next) {
+            // for (next = first_id(); key < qtab[next].key; next = qtab[next].next) {
         }
 
         // Insert the new element between prev and next

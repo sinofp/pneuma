@@ -1,12 +1,14 @@
 #include "trap.h"
 #include "csr.h"
+#include "debug.h"
 #include "file.h"
 #include "plic.h"
 #include "proc.h"
+#include "qtab.h"
 #include "sbi.h"
 #include "virtio.h"
 
-constexpr uint64_t timer_interrupt_interval = 1000; // 100000;
+constexpr uint64_t timer_interrupt_interval = 50000;
 
 // proc.cc
 extern process *idle_proc, *current_proc;
@@ -163,7 +165,7 @@ void handle_syscall(trap_frame *f) {
         printf("process %d exited\n", current_proc->pid);
         current_proc->state = ProcState::UNUSED;
         // TODO free resources of exited proc
-        yield();
+        reschedule();
         PANIC("unreachable");
     case SYS_READFILE:
     case SYS_WRITEFILE: {
@@ -218,7 +220,9 @@ extern "C" void handle_trap(trap_frame *f) {
         break;
     case STimerIntr:
         set_next_timer_interrupt();
-        printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
+        // printf("Cool timer interrupt, current time: %ld!\n", static_cast<long>(csr::time::read()));
+        if (!ready_queue().empty())
+            reschedule();
         break;
     case SExternalIntr: {
         // External interrupt from PLIC
