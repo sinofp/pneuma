@@ -36,8 +36,6 @@ int writefile(unsigned long fd, const char *buf, size_t len) {
     return syscall(SYS_WRITEFILE, fd, reinterpret_cast<unsigned long>(buf), len);
 }
 
-int yield() { return syscall(SYS_YIELD, 0, 0, 0); }
-
 [[using gnu: section(".text.start"), naked]]
 void start(void) {
     asm volatile("mv sp, %[stack_top] \n"

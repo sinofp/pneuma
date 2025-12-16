@@ -56,23 +56,20 @@ extern "C" void kernel_main() {
     auto *proc_b = create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
     printf("Process created: user-b (%d)\n", proc_b->pid);
 
-    // printf("Creating shell process\n");
-    // create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
+    // auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
+    // printf("Process created: shell (%d)\n", shell->pid);
 
-    // yield();
-    suspend(idle_proc, false);
-    idle_proc->prio = 0;
-    resume(idle_proc, false);
+    chprio(idle_proc, 0, false);
     resume(proc_a, false);
     resume(proc_b, false);
+    // resume(shell, false);
     reschedule();
 
-    // for (int i = 0; i < 5; ++i) {
-    //     printf("switched to idle process\n");
-    //     asm("wfi");
-    //     // yield();
-    //     reschedule();
-    // }
+    for (int i = 0; i < 5; ++i) {
+        printf("switched to idle process\n");
+        asm("wfi");
+        reschedule();
+    }
 
     printf("I'm going to bed, bye.\n");
     shutdown();

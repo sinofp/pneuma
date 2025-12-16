@@ -158,7 +158,9 @@ void handle_syscall(trap_frame *f) {
                 f->a0 = ch;
                 break;
             }
-            yield();
+            // Give interact process higher priority
+            // TODO constant
+            chprio(current_proc, 30);
         }
         break;
     case SYS_EXIT:
@@ -195,9 +197,6 @@ void handle_syscall(trap_frame *f) {
         f->a0 = len;
         break;
     } break;
-    case SYS_YIELD:
-        yield();
-        break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
@@ -250,8 +249,10 @@ extern "C" void handle_trap(trap_frame *f) {
         break;
     case LoadPageFault:
     case StoreAmoPageFault:
+        PANIC("Load/Store Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        break;
     case InstPageFault:
-        PANIC("Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
+        PANIC("Instruction Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);
         break;
     default:
         PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, user_pc);

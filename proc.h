@@ -35,7 +35,7 @@ constexpr xlen_t SATP_SV39 = 8ull << 60;
 constexpr vaddr_t USER_BASE = 0x1000000;
 
 process *create_process(span<const uint8_t> image);
-void yield();
+void chprio(process *, int32_t, bool = true);
 void suspend(process *, bool = true);
 void resume(process *, bool = true);
 void ready(process *, bool = true);

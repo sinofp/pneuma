@@ -104,7 +104,7 @@ void switch_context(T *prev_sp, T next_sp) {
         // clang-format off
         // Save callee-saved registers onto the current process's stack.
         "addi sp, sp, -%[size]\n"
-        // This ra is the return address back into the caller (yield)
+        // This ra is the return address back into the caller (reschedule)
         STORE " ra,  %[ra_offset](sp)\n"
         STORE " s0,  %[s0_offset](sp)\n"
         STORE " s1,  %[s1_offset](sp)\n"
@@ -124,7 +124,7 @@ void switch_context(T *prev_sp, T next_sp) {
         "mv sp, a1\n"       // Switch stack pointer (sp) here
 
         // Restore callee-saved registers from the next process's stack.
-        // Loads the return address of next process (its yield)
+        // Loads the return address of next process (its reschedule)
         LOAD " ra,  %[ra_offset](sp)\n"
         LOAD " s0,  %[s0_offset](sp)\n"
         LOAD " s1,  %[s1_offset](sp)\n"
@@ -153,36 +153,6 @@ void switch_context(T *prev_sp, T next_sp) {
           [s10_offset] "i"(offsetof(reg_ctx, s10)), [s11_offset] "i"(offsetof(reg_ctx, s11)));
 }
 
-void yield() {
-    // Search for a runnable process
-    process *next = idle_proc;
-    for (auto i = 0uz; i < PROCS_MAX; i++) {
-        process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
-        if (proc->state == READY && proc->pid > 0) {
-            next = proc;
-            break;
-        }
-    }
-
-    // If there's no runnable process other than the current one, return and continue processing
-    if (next == current_proc)
-        return;
-
-    csr::satp{ next->page_table }.write();
-
-    auto kernel_stack = reinterpret_cast<xlen_t>(&next->stack[sizeof(next->stack)]);
-
-    // Save the kernel stack for the currently executing process for exception handling
-    asm volatile("csrw sscratch, %[sscratch]\n"
-                 :
-                 : [sscratch] "r"(kernel_stack));
-
-    // Context switch
-    process *prev = current_proc;
-    current_proc = next;
-    switch_context(&prev->sp, next->sp);
-}
-
 // TODO bad_pid
 
 void ready(process *proc, bool instant) {
@@ -191,6 +161,12 @@ void ready(process *proc, bool instant) {
     ready_queue().insert(proc->pid, proc->prio);
     if (instant)
         reschedule();
+}
+
+void chprio(process *proc, qkey_t prio, bool instant) {
+    suspend(proc, false);
+    proc->prio = prio;
+    resume(proc, instant);
 }
 
 void suspend(process *proc, bool instant) {
