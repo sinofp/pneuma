@@ -56,13 +56,14 @@ extern "C" void kernel_main() {
     auto *proc_b = create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
     printf("Process created: user-b (%d)\n", proc_b->pid);
 
-    // auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
-    // printf("Process created: shell (%d)\n", shell->pid);
+    auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
+    printf("Process created: shell (%d)\n", shell->pid);
 
-    chprio(idle_proc, 0, false);
+    chprio(idle_proc, ProcPrio::N, false);
+    // chprio(shell, ProcPrio::I, false);
     resume(proc_a, false);
     resume(proc_b, false);
-    // resume(shell, false);
+    resume(shell, false);
     reschedule();
 
     for (int i = 0; i < 5; ++i) {

@@ -87,7 +87,10 @@ process *create_process(span<const uint8_t> image) {
     // Initialize fields.
     // Can't construct and swap because the uint8_t stack[];
     proc->pid = i;
-    proc->prio = 20; // default prio
+    // MLFQ rule 3: Put process in the highest queue when created
+    // I give it to the second highest because I'll give interactive program (shell) the highest.
+    // Although that means only the shell takes the CPU forever.
+    proc->prio = ProcPrio::IV; // default prio
     proc->sp = sp;
     proc->state = SUSPENDED;
     proc->page_table = page_table;
@@ -158,15 +161,18 @@ void switch_context(T *prev_sp, T next_sp) {
 void ready(process *proc, bool instant) {
     csr::intr_guard g;
     proc->state = READY;
-    ready_queue().insert(proc->pid, proc->prio);
+    ready_queue().insert(proc->pid, static_cast<qkey_t>(proc->prio));
     if (instant)
         reschedule();
 }
 
-void chprio(process *proc, qkey_t prio, bool instant) {
-    suspend(proc, false);
+void chprio(process *proc, ProcPrio prio, bool instant) {
     proc->prio = prio;
-    resume(proc, instant);
+    if (READY == proc->state) {
+        csr::intr_guard g;
+        ready_queue().remove(proc->pid);
+        ready_queue().insert(proc->pid, static_cast<qkey_t>(proc->prio));
+    }
 }
 
 void suspend(process *proc, bool instant) {
@@ -206,11 +212,11 @@ void reschedule() {
     // If it's still running, we only switch if a higher priority process is ready
     if (RUNNING == current_proc->state) {
         // MLFQ rule 1: Keep executing if current priority is the highest
-        if (readyq.first_key() < current_proc->prio)
+        if (readyq.first_key() < static_cast<qkey_t>(current_proc->prio))
             return;
 
         current_proc->state = READY;
-        readyq.insert(current_proc->pid, current_proc->prio);
+        readyq.insert(current_proc->pid, static_cast<qkey_t>(current_proc->prio));
     }
 
     // Switch to highest priority ready process

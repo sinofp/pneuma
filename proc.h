@@ -13,10 +13,19 @@ enum class ProcState {
     RUNNING,
 };
 
+enum class ProcPrio : int32_t {
+    V = 5,
+    IV = 4,
+    III = 3,
+    II = 2,
+    I = 1,
+    N = 0, // Only for idle/nulla process
+};
+
 struct process {
     pid_t pid;       // Process ID
     ProcState state; // Process state
-    int32_t prio;
+    ProcPrio prio;
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
                 // be a vaddr_t *.
     uint8_t stack[1024 * 1024]; // Kernel stack
@@ -35,7 +44,7 @@ constexpr xlen_t SATP_SV39 = 8ull << 60;
 constexpr vaddr_t USER_BASE = 0x1000000;
 
 process *create_process(span<const uint8_t> image);
-void chprio(process *, int32_t, bool = true);
+void chprio(process *, ProcPrio, bool = true);
 void suspend(process *, bool = true);
 void resume(process *, bool = true);
 void ready(process *, bool = true);
