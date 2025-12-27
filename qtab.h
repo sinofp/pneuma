@@ -12,9 +12,10 @@ constexpr qid_t EMPTY = -1;
 constexpr qkey_t MAXKEY = 0x7FFFFFFF;
 constexpr qkey_t MINKEY = 0x80000000;
 
-constexpr size_t NQUEUES = 1;                       // # of different queues (ready, sleep, etc.)
+constexpr size_t NQUEUES = 2;                       // # of different queues (ready, sleep, etc.)
 constexpr size_t NQENT = PROCS_MAX + (NQUEUES * 2); // * 2 for head & tail
 constexpr qid_t READY_QUEUE = PROCS_MAX;
+constexpr qid_t SLEEP_QUEUE = PROCS_MAX + 2;
 
 struct qent {
     qkey_t key;
@@ -32,11 +33,11 @@ void queue_init();
 class queue_view {
     qid_t q;
 
+public:
     constexpr qid_t head_id() const { return q; }
 
     constexpr qid_t tail_id() const { return q + 1; }
 
-public:
     qid_t first_id() const { return qtab[head_id()].next; }
 
     // TODO remove?
@@ -67,7 +68,8 @@ public:
     // TODO change it to first_id() == tail_id()?
     bool empty() const { return first_id() >= static_cast<qid_t>(PROCS_MAX); }
 
-    qkey_t first_key() const { return qtab[first_id()].key; }
+    // Return a reference so we can modify (for sleep queue)
+    qkey_t &first_key() const { return qtab[first_id()].key; }
 
     // Insert at the end.
     // This method is only used for FIFO queues, so we ignore their key (priority)
@@ -105,11 +107,9 @@ public:
         return pid;
     }
 
-    // Insert in descending order
-    inline optional<pid_t> insert(pid_t pid, qkey_t key) {
-        if (bad_pid(pid)) {
+    inline optional<pid_t> insert_desc(pid_t pid, qkey_t key) {
+        if (bad_pid(pid))
             return nullopt;
-        }
 
         qid_t next;
         // Xinu book: 'The loop must eventually terminate because the key of the tail element contains a value less than
@@ -130,10 +130,32 @@ public:
         return pid;
     }
 
-    inline optional<pid_t> remove(pid_t pid) {
-        if (bad_pid(pid)) {
+    inline optional<pid_t> insert_delta(pid_t pid, qid_t key) {
+        if (bad_pid(pid))
             return nullopt;
+
+        qid_t next;
+        // Xinu book: 'At any time during the search, both key and qtab[next].key specify a delay relative to the time
+        // at which the predecessor of "next" awakens.'
+        for (next = first_id(); next != tail_id() and qtab[next].key <= key;
+             key -= qtab[next].key, next = qtab[next].next) {
         }
+
+        auto prev = qtab[next].prev;
+        qtab[pid] = { key, next, prev };
+        qtab[prev].next = qtab[next].prev = pid;
+        if (next != tail_id())
+            // Xinu book: 'The subtraction is guaranteed to produce a nonnegative value because the termination
+            // condition for the loop guarantees that the key inserted is less than the next key on the list.'
+            qtab[next].key -= key;
+
+        return pid;
+    }
+
+    inline optional<pid_t> remove(pid_t pid) {
+        if (bad_pid(pid))
+            return nullopt;
+
         auto next = qtab[pid].next;
         auto prev = qtab[pid].prev;
         qtab[prev].next = next;
@@ -144,3 +166,5 @@ public:
 };
 
 constexpr queue_view ready_queue() { return queue_view(READY_QUEUE); }
+
+constexpr queue_view sleep_queue() { return queue_view(SLEEP_QUEUE); }

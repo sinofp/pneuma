@@ -11,6 +11,7 @@ enum class ProcState {
     SUSPENDED,
     READY,
     RUNNING,
+    SLEEPING,
 };
 
 enum class ProcPrio : int32_t {
@@ -48,6 +49,8 @@ void chprio(process *, ProcPrio, bool = true);
 void suspend(process *, bool = true);
 void resume(process *, bool = true);
 void ready(process *, bool = true);
+void sleep_ms(int32_t);
+void wakeup();
 
 void reschedule();
 

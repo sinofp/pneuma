@@ -37,12 +37,14 @@ extern "C" void kernel_main() {
     printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
     idle_proc = create_process({ nullptr, 0 });
-    // idle_proc->pid = 0; // idle
+    // Set the idle process running manually, so it can be saved to readyq in reschedule
+    idle_proc->state = ProcState::RUNNING;
+    chprio(idle_proc, ProcPrio::N, false);
     current_proc = idle_proc;
     printf("Process created: idle (%d)\n", idle_proc->pid);
 
     // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
-    // Therefore it must be placed after idel_proc = create_process, otherwise we'll have
+    // Therefore it must be placed after idle_proc = create_process, otherwise we'll have
     // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
     virtio_blk_init();
     fs_init();
@@ -59,15 +61,14 @@ extern "C" void kernel_main() {
     auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
 
-    chprio(idle_proc, ProcPrio::N, false);
-    // chprio(shell, ProcPrio::I, false);
-    resume(proc_a, false);
     resume(proc_b, false);
-    resume(shell, false);
+    resume(proc_a, false);
+    // resume(shell, false);
     reschedule();
 
-    for (int i = 0; i < 5; ++i) {
-        printf("switched to idle process\n");
+    // for (int i = 0; i < 5; ++i) {
+    for (;;) {
+        // printf("switched to idle process\n");
         asm("wfi");
         reschedule();
     }

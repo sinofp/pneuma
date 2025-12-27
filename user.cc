@@ -27,6 +27,8 @@ int putchar(int ch) { return syscall(SYS_PUTCHAR, ch, 0, 0); }
 
 int getchar() { return syscall(SYS_GETCHAR, 0, 0, 0); }
 
+int sleep_ms(unsigned ms) { return syscall(SYS_SLEEP, ms, 0, 0); }
+
 // TODO span
 int readfile(unsigned long fd, char *buf, size_t len) {
     return syscall(SYS_READFILE, fd, reinterpret_cast<unsigned long>(buf), len);

@@ -38,3 +38,9 @@ template <typename T> inline auto read(paddr_t addr) { return *reinterpret_cast<
 
 template <typename T> inline void write(paddr_t addr, T data) { *reinterpret_cast<volatile T *>(addr) = data; }
 } // namespace mmio
+
+// QEMU: RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ
+// TODO: Read from DTS/set default for SiFive U74.
+constexpr uint64_t CLK_FREQ_SEC = 10'000'000;
+constexpr uint64_t CLK_FREQ_MS = CLK_FREQ_SEC / 1'000;
+constexpr uint64_t CLK_FREQ_US = CLK_FREQ_MS / 1'000;

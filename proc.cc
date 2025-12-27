@@ -108,19 +108,19 @@ void switch_context(T *prev_sp, T next_sp) {
         // Save callee-saved registers onto the current process's stack.
         "addi sp, sp, -%[size]\n"
         // This ra is the return address back into the caller (reschedule)
-        STORE " ra,  %[ra_offset](sp)\n"
-        STORE " s0,  %[s0_offset](sp)\n"
-        STORE " s1,  %[s1_offset](sp)\n"
-        STORE " s2,  %[s2_offset](sp)\n"
-        STORE " s3,  %[s3_offset](sp)\n"
-        STORE " s4,  %[s4_offset](sp)\n"
-        STORE " s5,  %[s5_offset](sp)\n"
-        STORE " s6,  %[s6_offset](sp)\n"
-        STORE " s7,  %[s7_offset](sp)\n"
-        STORE " s8,  %[s8_offset](sp)\n"
-        STORE " s9,  %[s9_offset](sp)\n"
-        STORE " s10, %[s10_offset](sp)\n"
-        STORE " s11, %[s11_offset](sp)\n"
+        STORE " ra,  %[ra](sp)\n"
+        STORE " s0,  %[s0](sp)\n"
+        STORE " s1,  %[s1](sp)\n"
+        STORE " s2,  %[s2](sp)\n"
+        STORE " s3,  %[s3](sp)\n"
+        STORE " s4,  %[s4](sp)\n"
+        STORE " s5,  %[s5](sp)\n"
+        STORE " s6,  %[s6](sp)\n"
+        STORE " s7,  %[s7](sp)\n"
+        STORE " s8,  %[s8](sp)\n"
+        STORE " s9,  %[s9](sp)\n"
+        STORE " s10, %[s10](sp)\n"
+        STORE " s11, %[s11](sp)\n"
 
         // Switch the stack pointer.
         STORE " sp, (a0)\n" // *prev_sp = sp;
@@ -128,32 +128,30 @@ void switch_context(T *prev_sp, T next_sp) {
 
         // Restore callee-saved registers from the next process's stack.
         // Loads the return address of next process (its reschedule)
-        LOAD " ra,  %[ra_offset](sp)\n"
-        LOAD " s0,  %[s0_offset](sp)\n"
-        LOAD " s1,  %[s1_offset](sp)\n"
-        LOAD " s2,  %[s2_offset](sp)\n"
-        LOAD " s3,  %[s3_offset](sp)\n"
-        LOAD " s4,  %[s4_offset](sp)\n"
-        LOAD " s5,  %[s5_offset](sp)\n"
-        LOAD " s6,  %[s6_offset](sp)\n"
-        LOAD " s7,  %[s7_offset](sp)\n"
-        LOAD " s8,  %[s8_offset](sp)\n"
-        LOAD " s9,  %[s9_offset](sp)\n"
-        LOAD " s10, %[s10_offset](sp)\n"
-        LOAD " s11, %[s11_offset](sp)\n"
+        LOAD " ra,  %[ra](sp)\n"
+        LOAD " s0,  %[s0](sp)\n"
+        LOAD " s1,  %[s1](sp)\n"
+        LOAD " s2,  %[s2](sp)\n"
+        LOAD " s3,  %[s3](sp)\n"
+        LOAD " s4,  %[s4](sp)\n"
+        LOAD " s5,  %[s5](sp)\n"
+        LOAD " s6,  %[s6](sp)\n"
+        LOAD " s7,  %[s7](sp)\n"
+        LOAD " s8,  %[s8](sp)\n"
+        LOAD " s9,  %[s9](sp)\n"
+        LOAD " s10, %[s10](sp)\n"
+        LOAD " s11, %[s11](sp)\n"
         "addi sp, sp, %[size]\n" // Pop restored registers from stack
 
         // Return to next process' caller (pc = ra)
         "ret\n"
         // clang-format on
         :
-        : [size] "i"(static_cast<xlen_t>(sizeof(reg_ctx))), [ra_offset] "i"(offsetof(reg_ctx, ra)),
-          [s0_offset] "i"(offsetof(reg_ctx, s0)), [s1_offset] "i"(offsetof(reg_ctx, s1)),
-          [s2_offset] "i"(offsetof(reg_ctx, s2)), [s3_offset] "i"(offsetof(reg_ctx, s3)),
-          [s4_offset] "i"(offsetof(reg_ctx, s4)), [s5_offset] "i"(offsetof(reg_ctx, s5)),
-          [s6_offset] "i"(offsetof(reg_ctx, s6)), [s7_offset] "i"(offsetof(reg_ctx, s7)),
-          [s8_offset] "i"(offsetof(reg_ctx, s8)), [s9_offset] "i"(offsetof(reg_ctx, s9)),
-          [s10_offset] "i"(offsetof(reg_ctx, s10)), [s11_offset] "i"(offsetof(reg_ctx, s11)));
+        : [size] "i"(static_cast<xlen_t>(sizeof(reg_ctx))), [ra] "i"(offsetof(reg_ctx, ra)),
+          [s0] "i"(offsetof(reg_ctx, s0)), [s1] "i"(offsetof(reg_ctx, s1)), [s2] "i"(offsetof(reg_ctx, s2)),
+          [s3] "i"(offsetof(reg_ctx, s3)), [s4] "i"(offsetof(reg_ctx, s4)), [s5] "i"(offsetof(reg_ctx, s5)),
+          [s6] "i"(offsetof(reg_ctx, s6)), [s7] "i"(offsetof(reg_ctx, s7)), [s8] "i"(offsetof(reg_ctx, s8)),
+          [s9] "i"(offsetof(reg_ctx, s9)), [s10] "i"(offsetof(reg_ctx, s10)), [s11] "i"(offsetof(reg_ctx, s11)));
 }
 
 // TODO bad_pid
@@ -161,7 +159,7 @@ void switch_context(T *prev_sp, T next_sp) {
 void ready(process *proc, bool instant) {
     csr::intr_guard g;
     proc->state = READY;
-    ready_queue().insert(proc->pid, static_cast<qkey_t>(proc->prio));
+    ready_queue().insert_desc(proc->pid, static_cast<qkey_t>(proc->prio));
     if (instant)
         reschedule();
 }
@@ -171,7 +169,7 @@ void chprio(process *proc, ProcPrio prio, bool instant) {
     if (READY == proc->state) {
         csr::intr_guard g;
         ready_queue().remove(proc->pid);
-        ready_queue().insert(proc->pid, static_cast<qkey_t>(proc->prio));
+        ready_queue().insert_desc(proc->pid, static_cast<qkey_t>(proc->prio));
     }
 }
 
@@ -199,12 +197,42 @@ void resume(process *proc, bool instant) {
     ready(proc, instant);
 }
 
+void sleep_ms(int32_t delay) {
+    if (delay < 0)
+        return;
+    if (!delay) {
+        ready(current_proc);
+        return;
+    }
+    if (MAXKEY <= delay)
+        PANIC("Sleeping time exceeds MAXKEY.");
+    csr::intr_guard g;
+    sleep_queue().insert_delta(current_proc->pid, delay);
+    current_proc->state = ProcState::SLEEPING;
+    reschedule();
+}
+
+void wakeup() {
+    auto sleepq = sleep_queue();
+    while (!sleepq.empty() and sleepq.first_key() <= 0) {
+        auto pid = sleepq.dequeue();
+        // Given that the queue is nonempty, dequeue must have value
+        // TODO unify the argument/return value: use either pid or procs
+        ready(&procs[pid.value()], false);
+    }
+    reschedule();
+}
+
 void reschedule() {
     csr::intr_guard g;
 
-    // printf("reschedule: current_proc->pid is %d\n", current_proc->pid);
+    // printf("reschedule: current_proc->pid: %d, prio: %d, running: %d\n", current_proc->pid,
+    //        static_cast<int>(current_proc->prio), RUNNING == current_proc->state);
     // print_procs();
-    // print_readyq();
+    // printf("readyq:\n");
+    // print(ready_queue);
+    // printf("sleepq:\n");
+    // print(sleep_queue);
 
     auto readyq = ready_queue();
 
@@ -216,7 +244,9 @@ void reschedule() {
             return;
 
         current_proc->state = READY;
-        readyq.insert(current_proc->pid, static_cast<qkey_t>(current_proc->prio));
+        readyq.insert_desc(current_proc->pid, static_cast<qkey_t>(current_proc->prio));
+        // printf("readyq after insert_desc:\n");
+        // print(ready_queue);
     }
 
     // Switch to highest priority ready process

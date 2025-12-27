@@ -7,6 +7,8 @@ void interrupt_init();
 using sxlen_t = unsigned long;
 
 struct [[gnu::packed]] trap_frame {
+    sxlen_t sepc;
+    sxlen_t sstatus;
     xlen_t ra;
     xlen_t gp;
     xlen_t tp;

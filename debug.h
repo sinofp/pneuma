@@ -3,11 +3,22 @@
 #include "proc.h"
 #include "qtab.h"
 
-inline void print_readyq() {
-    auto readyq = ready_queue();
-    printf("readyq content (first pid is %d):\n", readyq.first_id());
-    for (const auto &qe : readyq)
-        printf("  prio: %d, prev: %d, next: %d\n", qe.key, qe.prev, qe.next);
+inline void print(queue_view (*queue)()) {
+    auto q = queue();
+    auto pid = q.first_id();
+    for (const auto &qe : q) {
+        printf("  pid: %d, key: %d, prev: ", pid, qe.key);
+        if (q.head_id() == qe.prev)
+            printf("h");
+        else
+            printf("%d", qe.prev);
+        printf(", next: ");
+        if (q.tail_id() == qe.next)
+            printf("t\n");
+        else
+            printf("%d\n", qe.next);
+        pid = qe.next;
+    }
 }
 
 inline void print_procs() {

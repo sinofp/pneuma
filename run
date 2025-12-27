@@ -5,11 +5,12 @@
 set -ue
 
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot]
+# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux]
 local arch=rv32
 local debug=false
 local use_gdb=false
 local use_uboot=false
+local use_tmux=false
 
 # Parse arguments
 while (( $# > 0 )) {
@@ -34,9 +35,13 @@ while (( $# > 0 )) {
             use_uboot=true
             shift
             ;;
+        (--tmux)
+            use_tmux=true
+            shift
+            ;;
         (*)
             echo "Error: Unknown argument '$1'"
-            echo "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot]"
+            echo "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux]"
             exit 1
             ;;
     }
@@ -62,6 +67,7 @@ local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bi
 
 # Build kernel for selected architecture
 nix build --no-substitute .#$arch -o result-$arch
+# nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
 local shell_elf=result-$arch/shell.elf
@@ -94,6 +100,11 @@ pushd disk
 tar cf ../disk.tar --format=ustar *.txt
 popd
 
+local qemu_common_args="-machine virt -bios $opensbi_fw -nographic      -serial mon:stdio \
+      --no-reboot -kernel $qemu_kernel \
+      -drive id=drive0,file=disk.tar,format=raw,if=none \
+      -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0"
+
 if [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
@@ -101,38 +112,46 @@ if [[ $debug == true ]] {
     local kernel_comp_dir=$(llvm-dwarfdump $kernel_elf | grep DW_AT_comp_dir | head -1 | sed -E 's|.*"(.*)".*|\1|')
 
     # Start QEMU in background with debugger support
-    $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
-          --no-reboot -kernel $qemu_kernel \
-	  -drive id=drive0,file=disk.tar,format=raw,if=none \
-          -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
-          -s -S &
+    $qemu ${(z)qemu_common_args} -s -S &
 
     local qemu_pid=$!
 
-    # Split wezterm pane and start debugger in the new bottom pane
+    # Prepare debugger command
+    local debugger_cmd
+    local debugger_name
     if [[ $use_gdb == true ]] {
-        echo 'Splitting terminal and starting GDB...'
-        echo "Source mapping: $kernel_comp_dir -> $PWD"
-        wezterm cli split-pane --bottom --percent 62 -- zsh -c "
+        debugger_name="GDB"
+        debugger_cmd="
             gdb-dashboard $kernel_elf \
-              -ex 'set confirm off' \
-              -ex 'set substitute-path $kernel_comp_dir "$PWD"' \
-              -ex 'add-symbol-file $shell_elf' \
-              -ex 'add-symbol-file $user_a_elf' \
-              -ex 'add-symbol-file $user_b_elf' \
-              -ex 'target remote localhost:1234'
-        " >/dev/null # Ignores pane-id because it'll be closed when exiting GDB
+                -ex 'set confirm off' \
+                -ex 'set substitute-path $kernel_comp_dir "$PWD"' \
+                -ex 'add-symbol-file $shell_elf' \
+                -ex 'add-symbol-file $user_a_elf' \
+                -ex 'add-symbol-file $user_b_elf' \
+                -ex 'target remote localhost:1234'
+        "
     } else {
-        echo 'Splitting terminal and starting LLDB...'
-        echo "Source mapping: $kernel_comp_dir -> $PWD"
-        wezterm cli split-pane --bottom --percent 62 -- zsh -c "
+        debugger_name="LLDB"
+        debugger_cmd="
             lldb $kernel_elf \
-              -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
-              -o 'image add $shell_elf' \
-              -o 'image add $user_a_elf' \
-              -o 'image add $user_b_elf' \
-              -o 'gdb-remote localhost:1234'
-        " >/dev/null # Ignores pane-id because it'll be closed when exiting LLDB
+                -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
+                -o 'image add $shell_elf' \
+                -o 'image add $user_a_elf' \
+                -o 'image add $user_b_elf' \
+                -o 'gdb-remote localhost:1234'
+        "
+    }
+
+    echo "Source mapping: $kernel_comp_dir -> $PWD"
+
+    # Split pane and start debugger
+    if [[ $use_tmux == true ]] {
+        echo "Splitting with tmux and starting $debugger_name..."
+        tmux split-window -v -p 62 "$debugger_cmd"
+    } else {
+        # Split wezterm pane and start debugger in the new bottom pane
+        echo "Splitting terminal and starting $debugger_name..."
+        wezterm cli split-pane --bottom --percent 62 -- zsh -c "$debugger_cmd" >/dev/null # Ignores pane-id because it'll be closed when exiting debugger
     }
 
     # Wait for QEMU to finish
@@ -145,9 +164,5 @@ if [[ $debug == true ]] {
     } else {
         echo "Running ${arch:u} kernel..."
     }
-    $qemu -machine virt -bios $opensbi_fw -nographic -serial mon:stdio \
-          --no-reboot -kernel $qemu_kernel \
-          -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log \
-	  -drive id=drive0,file=disk.tar,format=raw,if=none \
-          -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0
+    $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
 }
