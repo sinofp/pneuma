@@ -116,6 +116,7 @@
                 rutabagaSupport = false;
                 uringSupport = false;
               })
+              dtc
             ];
 
             shellHook = ''

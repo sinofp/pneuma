@@ -5,12 +5,13 @@
 set -ue
 
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux]
+# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux] [--dts]
 local arch=rv32
 local debug=false
 local use_gdb=false
 local use_uboot=false
 local use_tmux=false
+local use_dts=false
 
 # Parse arguments
 while (( $# > 0 )) {
@@ -39,9 +40,13 @@ while (( $# > 0 )) {
             use_tmux=true
             shift
             ;;
+        (--dts)
+            use_dts=true
+            shift
+            ;;
         (*)
             echo "Error: Unknown argument '$1'"
-            echo "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux]"
+            echo "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--tmux] [--dts]"
             exit 1
             ;;
     }
@@ -66,8 +71,8 @@ echo "Building for ${arch:u}..."
 local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
 
 # Build kernel for selected architecture
-nix build --no-substitute .#$arch -o result-$arch
-# nix build .#$arch -o result-$arch
+# nix build --no-substitute .#$arch -o result-$arch
+nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
 local shell_elf=result-$arch/shell.elf
@@ -96,14 +101,34 @@ if [[ $use_uboot == true ]] {
     qemu_kernel=$kernel_elf
 }
 
+local qemu_machine="virt"
+if [[ $use_dts == true ]] {
+    qemu_machine="virt,dumpdtb=virt-${arch}.dtb"
+}
+
 pushd disk
 tar cf ../disk.tar --format=ustar *.txt
 popd
 
-local qemu_common_args="-machine virt -bios $opensbi_fw -nographic      -serial mon:stdio \
-      --no-reboot -kernel $qemu_kernel \
+local qemu_common_args="-machine $qemu_machine \
+      -bios $opensbi_fw -kernel $qemu_kernel \
+      --no-reboot -nographic -serial mon:stdio \
       -drive id=drive0,file=disk.tar,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0"
+
+if [[ $use_dts == true ]] {
+    local dts=virt-${arch}.dts
+    rm -f dts
+    $qemu ${(z)qemu_common_args} >/dev/null 2>&1 || true
+    if [[ ! -f virt-${arch}.dtb ]] {
+        echo "Error: QEMU did not produce virt-${arch}.dtb"
+        exit 1
+    }
+    dtc -I dtb -O dts -o $dts virt-${arch}.dtb
+    rm *.dtb
+    echo "Wrote $dts"
+    exit 0
+}
 
 if [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
