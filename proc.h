@@ -34,6 +34,8 @@ struct process {
 };
 
 extern process procs[];
+extern process *current_proc;
+extern process *idle_proc;
 
 inline bool bad_pid(pid_t id) { return id < 0 or PROCS_MAX <= id or ProcState::UNUSED == procs[id].state; }
 

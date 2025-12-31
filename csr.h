@@ -201,9 +201,9 @@ inline auto read() {
     }
 }
 
-inline auto read_ms() { return read() / CLK_FREQ_MS; }
+inline auto read_ms() { return read() / clk_freq_ms; }
 
-inline auto read_us() { return read() / CLK_FREQ_US; }
+inline auto read_us() { return read() / clk_freq_us; }
 } // namespace time
 
 class intr_guard {

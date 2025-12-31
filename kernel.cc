@@ -1,8 +1,10 @@
 #include "kernel.h"
 #include "common.h"
 #include "csr.h"
+#include "fdt.h"
 #include "file.h"
 #include "mem.h"
+#include "plic.h"
 #include "proc.h"
 #include "qtab.h"
 #include "sbi.h"
@@ -16,14 +18,16 @@ extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
 extern uint8_t _binary_user_a_bin_start[], _binary_user_a_bin_size[];
 extern uint8_t _binary_user_b_bin_start[], _binary_user_b_bin_size[];
 
-// proc.cc
-extern process *idle_proc, *current_proc;
-
 file files[FILES_MAX];
 
-extern "C" void kernel_main() {
+extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     memset(__bss, 0, __bss_end - __bss);
+    fdt::init(fdt_ptr);
+    printf("\n\ndtb: ptr=%p virtio_base=0x%lx virtio_irq=%d plic_base=0x%lx\n", fdt_ptr,
+           static_cast<unsigned long>(virtio_blk_base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
+           static_cast<unsigned long>(plic::start_addr));
 
+    // TODO make xxx_int xxx::init
     queue_init();
     interrupt_init();
 

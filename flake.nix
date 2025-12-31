@@ -154,6 +154,7 @@
             ./ustar.cc
             ./trap.cc
             ./qtab.cc
+            ./fdt.cc
           ];
           shellSources = [
             ./user.cc
@@ -186,6 +187,7 @@
             ./qtab.h
             ./optional.h
             ./debug.h
+            ./fdt.h
           ];
           linkerScripts = [
             ./user.ld

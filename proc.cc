@@ -11,8 +11,6 @@ process procs[PROCS_MAX]; // All process control structures.
 process *current_proc; // Currently running process
 process *idle_proc;    // Idle process
 
-extern uint8_t __kernel_base[], __free_ram_end[];
-
 using enum ProcState;
 
 // We only execute this function at the beginning of a user process.
@@ -68,7 +66,7 @@ process *create_process(span<const uint8_t> image) {
         map_page(page_table, kaddr, kaddr, PAGE_R | PAGE_W | PAGE_X);
 
     // Map virtio-block MMIO
-    map_page(page_table, VIRTIO_BLK_PADDR, VIRTIO_BLK_PADDR, PAGE_R | PAGE_W);
+    map_page(page_table, virtio_blk_base, virtio_blk_base, PAGE_R | PAGE_W);
 
     // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
     for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
@@ -238,8 +236,7 @@ void reschedule() {
 
     // The caller is supposed to change the state if needed
     // If it's still running, we only switch if a higher priority process is ready
-    if (RUNNING == current_proc->state) {
-        // MLFQ rule 1: Keep executing if current priority is the highest
+    if (RUNNING == current_proc->state) { // MLFQ rule 1: Keep executing if current priority is the highest
         if (readyq.first_key() < static_cast<qkey_t>(current_proc->prio))
             return;
 
@@ -274,4 +271,5 @@ void reschedule() {
     switch_context(&prev->sp, next->sp);
     // printf("reschedule: Returned from switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
     //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
+    // TODO print SIE and SPIE
 }

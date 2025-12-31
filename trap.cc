@@ -12,9 +12,6 @@ constexpr uint64_t timer_interrupt_ms = 5;
 constexpr int64_t quantum = 1;
 int64_t preempt = quantum;
 
-// proc.cc
-extern process *idle_proc, *current_proc;
-
 [[using gnu: naked, aligned(4)]]
 void kernel_entry() {
     asm volatile(
@@ -218,7 +215,7 @@ void handle_syscall(trap_frame *f) {
     }
 }
 
-inline void set_next_timer_interrupt() { sbi_set_timer(csr::time::read() + timer_interrupt_ms * CLK_FREQ_MS); }
+inline void set_next_timer_interrupt() { sbi_set_timer(csr::time::read() + timer_interrupt_ms * clk_freq_ms); }
 
 extern "C" void handle_trap(trap_frame *f) {
     auto scause = csr::scause::read();

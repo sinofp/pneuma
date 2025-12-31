@@ -1,7 +1,5 @@
 #include "common.h"
 
-extern int sbi_debug_console_write(const char *);
-
 void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
     auto *d = static_cast<uint8_t *>(dst);
     auto *s = static_cast<const uint8_t *>(src);

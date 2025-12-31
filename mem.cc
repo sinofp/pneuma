@@ -1,7 +1,5 @@
 #include "mem.h"
 
-extern uint8_t __free_ram[], __free_ram_end[];
-
 paddr_t alloc_pages(size_t n) {
     static auto next_paddr = reinterpret_cast<paddr_t>(__free_ram);
     auto paddr = next_paddr;

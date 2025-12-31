@@ -36,11 +36,12 @@ namespace mmio {
 // TODO concept to restrict T to uint32_t and uint64_t
 template <typename T> inline auto read(paddr_t addr) { return *reinterpret_cast<volatile T *>(addr); }
 
+template <typename T> inline auto read(paddr_t base, size_t offset) { return read<T>(base + offset); }
+
 template <typename T> inline void write(paddr_t addr, T data) { *reinterpret_cast<volatile T *>(addr) = data; }
+
+template <typename T> inline void write(paddr_t base, size_t offset, T data) { return write(base + offset, data); }
 } // namespace mmio
 
-// QEMU: RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ
-// TODO: Read from DTS/set default for SiFive U74.
-constexpr uint64_t CLK_FREQ_SEC = 10'000'000;
-constexpr uint64_t CLK_FREQ_MS = CLK_FREQ_SEC / 1'000;
-constexpr uint64_t CLK_FREQ_US = CLK_FREQ_MS / 1'000;
+extern uint32_t clk_freq_ms;
+extern uint32_t clk_freq_us;

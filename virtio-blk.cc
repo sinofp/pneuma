@@ -8,8 +8,9 @@ virtio_blk_req *blk_req;
 paddr_t blk_req_paddr;
 uint64_t blk_capacity;
 
-void virtio_reg_fetch_and_or32(unsigned offset, uint32_t value) {
-    mmio::write<uint32_t>(offset, mmio::read<uint32_t>(offset) | value);
+void virtio_reg_fetch_and_or32(size_t offset, uint32_t value) {
+    auto addr = virtio_blk_base + offset;
+    mmio::write<uint32_t>(addr, mmio::read<uint32_t>(addr) | value);
 }
 
 virtio_virtq *virtq_init(uint32_t index) {
@@ -20,26 +21,26 @@ virtio_virtq *virtq_init(uint32_t index) {
     vq->used_index = reinterpret_cast<uint16_t *volatile>(&vq->used.index);
 
     // 1. Select the queue writing its index (first queue is 0) to QueueSel.
-    mmio::write<uint32_t>(VIRTIO_REG_QUEUE_SEL, index);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_QUEUE_SEL, index);
     // 5. Notify the device about the queue size by writing the size to QueueNum.
-    mmio::write<uint32_t>(VIRTIO_REG_QUEUE_NUM, VIRTQ_ENTRY_NUM);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_QUEUE_NUM, VIRTQ_ENTRY_NUM);
     // 6. Notify the device about the used alignment by writing its value in bytes to QueueAlign.
-    mmio::write<uint32_t>(VIRTIO_REG_QUEUE_ALIGN, 0);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_QUEUE_ALIGN, 0);
     // 7. Write the physical number of the first page of the queue to the QueuePFN register.
-    mmio::write<uint32_t>(VIRTIO_REG_QUEUE_PFN, virtq_paddr);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_QUEUE_PFN, virtq_paddr);
     return vq;
 }
 
 void virtio_blk_init() {
-    if (mmio::read<uint32_t>(VIRTIO_REG_MAGIC) != 0x74726976)
+    if (mmio::read<uint32_t>(virtio_blk_base, VIRTIO_REG_MAGIC) != 0x74726976)
         PANIC("virtio: invalid magic value");
-    if (mmio::read<uint32_t>(VIRTIO_REG_VERSION) != 1)
+    if (mmio::read<uint32_t>(virtio_blk_base, VIRTIO_REG_VERSION) != 1)
         PANIC("virtio: invalid version");
-    if (mmio::read<uint32_t>(VIRTIO_REG_DEVICE_ID) != VIRTIO_DEVICE_BLK)
+    if (mmio::read<uint32_t>(virtio_blk_base, VIRTIO_REG_DEVICE_ID) != VIRTIO_DEVICE_BLK)
         PANIC("virtio: invalid device id");
 
     // 1. Reset the device.
-    mmio::write<uint32_t>(VIRTIO_REG_DEVICE_STATUS, 0);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_DEVICE_STATUS, 0);
     // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
     virtio_reg_fetch_and_or32(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_ACK);
     // 3. Set the DRIVER status bit.
@@ -49,10 +50,10 @@ void virtio_blk_init() {
     // 7. Perform device-specific setup, including discovery of virtqueues for the device
     blk_request_vq = virtq_init(0);
     // 8. Set the DRIVER_OK status bit.
-    mmio::write<uint32_t>(VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_DRIVER_OK);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_DRIVER_OK);
 
     // Get the disk capacity.
-    blk_capacity = mmio::read<uint64_t>(VIRTIO_REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
+    blk_capacity = mmio::read<uint64_t>(virtio_blk_base, VIRTIO_REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
     printf("virtio-blk: capacity is %ld bytes\n", static_cast<unsigned long>(blk_capacity));
 
     // Allocate a region to store requests to the device.
@@ -84,7 +85,7 @@ void virtq_kick(virtio_virtq *vq, uint16_t desc_index) {
 
     // virtio spec: '7. The driver sends an available buffer notification to the device if such notifications are not
     // suppressed.'
-    mmio::write<uint32_t>(VIRTIO_REG_QUEUE_NOTIFY, vq->queue_index);
+    mmio::write<uint32_t>(virtio_blk_base, VIRTIO_REG_QUEUE_NOTIFY, vq->queue_index);
 
     ++vq->last_used_index;
 }
