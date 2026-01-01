@@ -102,7 +102,7 @@ if [[ $use_uboot == true ]] {
 }
 
 local qemu_machine="virt"
-if [[ $use_dts == true ]] {
+if [[ $use_dts == true && $use_uboot == false ]] {
     qemu_machine="virt,dumpdtb=virt-${arch}.dtb"
 }
 
@@ -116,18 +116,28 @@ local qemu_common_args="-machine $qemu_machine \
       -drive id=drive0,file=disk.tar,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0"
 
-if [[ $use_dts == true ]] {
+if [[ $use_dts == true && $use_uboot == true ]] {
+    local uboot_dts=virt-${arch}-uboot.dts
+    rm -f $uboot_dts
+    {
+        print -r -- 'fdt addr $fdtcontroladdr' # Let U-Boot expand it, not ZSH
+        print -r -- "fdt print"
+        print -r -- "reset"
+    } | $qemu ${(z)qemu_common_args} 2>&1 \
+        | awk '/fdt print/{found=1;next} found && /reset/{exit} found{print}' \
+	> $uboot_dts
+    echo "Wrote $uboot_dts"
+    exit
+}
+
+if [[ $use_dts == true && $use_uboot == false ]] {
     local dts=virt-${arch}.dts
-    rm -f dts
+    rm -f $dts
     $qemu ${(z)qemu_common_args} >/dev/null 2>&1 || true
-    if [[ ! -f virt-${arch}.dtb ]] {
-        echo "Error: QEMU did not produce virt-${arch}.dtb"
-        exit 1
-    }
     dtc -I dtb -O dts -o $dts virt-${arch}.dtb
-    rm *.dtb
+    rm -f virt-${arch}.dtb
     echo "Wrote $dts"
-    exit 0
+    exit
 }
 
 if [[ $debug == true ]] {
