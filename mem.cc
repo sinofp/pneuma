@@ -4,8 +4,9 @@ paddr_t alloc_pages(size_t n) {
     static auto next_paddr = reinterpret_cast<paddr_t>(__free_ram);
     auto paddr = next_paddr;
     next_paddr += n * PAGE_SIZE;
+    // printf("next_paddr: 0x%lx, __free_ram: %p, free_ram_end: 0x%lx\n", next_paddr, __free_ram, free_ram_end);
 
-    if (next_paddr > reinterpret_cast<paddr_t>(__free_ram_end)) [[unlikely]]
+    if (free_ram_end < next_paddr) [[unlikely]]
         PANIC("out of memory");
 
     memset(reinterpret_cast<void *>(paddr), 0, n * PAGE_SIZE);

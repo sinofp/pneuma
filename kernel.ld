@@ -29,6 +29,6 @@ SECTIONS {
 
     . = ALIGN(4096);
     __free_ram = .;
-    . += 64 * 1024 * 1024; /* 64MB */
-    __free_ram_end = .;
+
+    /* The free ram end is parsed from device tree */
 }

@@ -61,7 +61,7 @@ process *create_process(span<const uint8_t> image) {
     // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
     // dynamically allocated areas managed by alloc_pages
     auto *page_table = reinterpret_cast<paddr_t *>(alloc_pages(1));
-    for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < reinterpret_cast<vaddr_t>(__free_ram_end);
+    for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < static_cast<vaddr_t>(free_ram_end);
          kaddr += PAGE_SIZE)
         map_page(page_table, kaddr, kaddr, PAGE_R | PAGE_W | PAGE_X);
 

@@ -6,8 +6,8 @@ paddr_t alloc_pages(size_t);
 
 void map_page(paddr_t *, vaddr_t, paddr_t, uint32_t);
 
-extern uint8_t __kernel_base[], __free_ram_end[];
-extern uint8_t __free_ram[];
+extern uint8_t __kernel_base[], __free_ram[];
+extern paddr_t free_ram_end;
 
 constexpr unsigned PAGE_V = 1 << 0; // "Valid" bit (entry is enabled)
 constexpr unsigned PAGE_R = 1 << 1; // Readable

@@ -59,7 +59,7 @@ bool compat_has(const char *data, uint32_t len, const char *target) {
     while (i < len) {
         const char *s = data + i;
         uint32_t j = 0;
-        while (i + j < len && s[j] != '\0')
+        while (i + j < len and s[j] != '\0')
             ++j;
         if (len <= i + j)
             break;
@@ -74,6 +74,7 @@ bool compat_has(const char *data, uint32_t len, const char *target) {
 struct node_ctx {
     int address_cells = -1;
     int size_cells = -1;
+    bool is_memory;
     bool is_cpus;
     bool is_virtio;
     bool is_plic;
@@ -100,6 +101,8 @@ uint64_t end_addr = uninitialised;       // 0x00600000;
 uint32_t clk_freq_sec = uninitialised;
 uint32_t clk_freq_ms = uninitialised;
 uint32_t clk_freq_us = uninitialised;
+
+paddr_t free_ram_end;
 
 namespace fdt {
 
@@ -145,7 +148,7 @@ void init(const header *fdt_ptr) {
         case FDT::BEGIN_NODE: {
             const char *name = reinterpret_cast<const char *>(p);
             uint32_t name_len = 0;
-            while (name_len < 1024 && name[name_len] != '\0')
+            while (name_len < 1024 and name[name_len] != '\0')
                 ++name_len;
             uint32_t skip = align4(name_len + 1);
             p = reinterpret_cast<const be<uint32_t> *>(reinterpret_cast<const uint8_t *>(p) + skip);
@@ -155,13 +158,15 @@ void init(const header *fdt_ptr) {
             else
                 PANIC("FDT exceeds maximum depth");
             stack[depth].is_cpus = !strcmp(name, "cpus");
+            // TODO add string startwidth to parse memory, and mmode_resv for U-Boot reserved memory
+            stack[depth].is_memory = !strcmp(name, "memory@80000000");
             continue;
         }
         case FDT::END_NODE: {
             if (depth < 0)
                 PANIC("FDT_END_NODE before the first FDT_BEGIN_NODE");
             const node_ctx &ctx = stack[depth];
-            if (ctx.is_virtio && ctx.reg_set && ctx.irq_set) {
+            if (ctx.is_virtio and ctx.reg_set and ctx.irq_set) {
                 if (!virtio_found || ctx.reg_addr < virtio_first) {
                     virtio_found = true;
                     virtio_first = ctx.reg_addr;
@@ -169,9 +174,14 @@ void init(const header *fdt_ptr) {
                     plic::VIRTIO_BLK_IRQ = ctx.irq;
                 }
             }
-            if (ctx.is_plic && ctx.reg_set) {
+            if (ctx.is_plic and ctx.reg_set) {
                 plic::start_addr = static_cast<paddr_t>(ctx.reg_addr);
                 plic::end_addr = plic::start_addr + ctx.reg_size;
+            }
+            if (ctx.is_memory and ctx.reg_set) {
+                free_ram_end = ctx.reg_addr + ctx.reg_size;
+                // printf("fdt::init: memory addr: 0x%lx, size: 0x%lx, calculated free_ram_end: %p\n", ctx.reg_addr,
+                //        ctx.reg_size, free_ram_end);
             }
             --depth;
             continue;
@@ -188,19 +198,12 @@ void init(const header *fdt_ptr) {
 
             auto &ctx = stack[depth];
             // #address-cells/#size-cells describe how children encode their reg.
-            if (!strcmp(prop_name, "#address-cells") && sizeof(be<uint32_t>) <= len) {
+            if (!strcmp(prop_name, "#address-cells") and sizeof(be<uint32_t>) <= len) {
                 ctx.address_cells = static_cast<int>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 continue;
             }
-            if (!strcmp(prop_name, "#size-cells") && sizeof(be<uint32_t>) <= len) {
+            if (!strcmp(prop_name, "#size-cells") and sizeof(be<uint32_t>) <= len) {
                 ctx.size_cells = static_cast<int>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
-                continue;
-            }
-            if (ctx.is_cpus && !strcmp(prop_name, "timebase-frequency") && sizeof(be<uint32_t>) <= len) {
-                // DT spec defines timebase-frequency as a single 32-bit cell.
-                clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
-                clk_freq_ms = clk_freq_sec / 1000u;
-                clk_freq_us = clk_freq_ms / 1000u;
                 continue;
             }
 
@@ -209,7 +212,15 @@ void init(const header *fdt_ptr) {
             if (!depth)
                 continue;
 
-            if (!strcmp(prop_name, "compatible") && 0 < len) {
+            if (ctx.is_cpus and !strcmp(prop_name, "timebase-frequency") and sizeof(be<uint32_t>) <= len) {
+                // DT spec defines timebase-frequency as a single 32-bit cell.
+                clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+                clk_freq_ms = clk_freq_sec / 1000u;
+                clk_freq_us = clk_freq_ms / 1000u;
+                continue;
+            }
+
+            if (!strcmp(prop_name, "compatible") and 0 < len) {
                 const char *data = reinterpret_cast<const char *>(prop_data);
                 if (compat_has(data, len, "virtio,mmio"))
                     ctx.is_virtio = true;
@@ -220,7 +231,7 @@ void init(const header *fdt_ptr) {
 
             // reg is encoded using the parent address/size cells.
             auto &parent = stack[depth - 1];
-            if (!strcmp(prop_name, "reg") && parent.address_cells != -1 && parent.size_cells != -1 &&
+            if (!strcmp(prop_name, "reg") and parent.address_cells != -1 and parent.size_cells != -1 and
                 static_cast<uint32_t>((parent.address_cells + parent.size_cells) * sizeof(be<uint32_t>)) <= len) {
                 auto cells = cell_view{ span<const be<uint32_t>>(
                     reinterpret_cast<const be<uint32_t> *>(prop_data),
@@ -233,7 +244,7 @@ void init(const header *fdt_ptr) {
                 ctx.reg_set = true;
                 continue;
             }
-            if (!strcmp(prop_name, "interrupts") && sizeof(be<uint32_t>) <= len) {
+            if (!strcmp(prop_name, "interrupts") and sizeof(be<uint32_t>) <= len) {
                 ctx.irq = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 ctx.irq_set = true;
                 continue;

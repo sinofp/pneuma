@@ -23,20 +23,20 @@ file files[FILES_MAX];
 extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     memset(__bss, 0, __bss_end - __bss);
     fdt::init(fdt_ptr);
-    printf("\n\ndtb: ptr=%p virtio_base=0x%lx virtio_irq=%d plic_base=0x%lx\n", fdt_ptr,
+    printf("\n\ndtb:\n  ptr=%p, virtio_base=0x%lx, virtio_irq=%d, plic_base=0x%lx, free_ram_end=0x%lx\n", fdt_ptr,
            static_cast<unsigned long>(virtio_blk_base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
-           static_cast<unsigned long>(plic::start_addr));
+           static_cast<unsigned long>(plic::start_addr), free_ram_end);
 
     // TODO make xxx_int xxx::init
     queue_init();
     interrupt_init();
 
-    printf("\n\nhello %s\n", "world!");
+    printf("hello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
     printf("1 + 2 = %d, 0x%lx, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
 
-    auto paddr0 = alloc_pages(2);
-    auto paddr1 = alloc_pages(1);
+    auto paddr0 = alloc_pages(1);
+    auto paddr1 = alloc_pages(2);
     printf("alloc_pages test: paddr0=0x%lx\n", paddr0);
     printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
