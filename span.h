@@ -2,17 +2,22 @@
 #include "common.h"
 
 template <typename T> class span {
-    const T *p;
+    T *p;
     size_t n;
 
 public:
-    span(const T *pointer, size_t size)
+    span(T *pointer, size_t size)
         : p(pointer)
         , n(size) {}
 
     [[nodiscard]]
     constexpr size_t size() const {
         return n;
+    }
+
+    [[nodiscard]]
+    constexpr T *data() {
+        return p;
     }
 
     [[nodiscard]]
