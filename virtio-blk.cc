@@ -5,6 +5,7 @@
 
 virtio_virtq *blk_request_vq;
 virtio_blk_req *blk_req;
+paddr_t blk_vq_paddr;
 paddr_t blk_req_paddr;
 uint64_t blk_capacity;
 
@@ -14,9 +15,13 @@ void virtio_reg_fetch_and_or32(size_t offset, uint32_t value) {
 }
 
 virtio_virtq *virtq_init(uint32_t index) {
-    // Allocate a region for the virtqueue.
-    auto virtq_paddr = alloc_pages(align_up(sizeof(virtio_virtq), PAGE_SIZE) / PAGE_SIZE);
-    auto *vq = reinterpret_cast<virtio_virtq *>(virtq_paddr);
+    if (!blk_vq_paddr)
+        PANIC("virtio: virtq buffers not allocated in mem::init");
+
+    blk_request_vq = reinterpret_cast<virtio_virtq *>(blk_vq_paddr);
+
+    auto virtq_paddr = blk_vq_paddr;
+    auto *vq = blk_request_vq;
     vq->queue_index = index;
     vq->used_index = reinterpret_cast<uint16_t *volatile>(&vq->used.index);
 
@@ -57,7 +62,8 @@ void virtio_blk_init() {
     printf("virtio-blk: capacity is %ld bytes\n", static_cast<unsigned long>(blk_capacity));
 
     // Allocate a region to store requests to the device.
-    blk_req_paddr = alloc_pages(align_up(sizeof(*blk_req), PAGE_SIZE) / PAGE_SIZE);
+    static_assert(sizeof(virtio_blk_req) <= PAGE_SIZE, "blk_req bigger than a page frame");
+    blk_req_paddr = alloc_frame();
     blk_req = reinterpret_cast<virtio_blk_req *>(blk_req_paddr);
 
     // Disable interrupt suppression in the virtqueue

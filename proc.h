@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kernel.h"
+#include "pagetable.h"
 #include "span.h"
 
 using pid_t = uint16_t;        // >= log2(PROCS_MAX)
@@ -30,7 +31,7 @@ struct process {
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
                 // be a vaddr_t *.
     uint8_t stack[1024 * 1024]; // Kernel stack
-    paddr_t *page_table;        // Page table for this process
+    pt_t page_table;            // Page table for this process
 };
 
 extern process procs[];
@@ -47,6 +48,7 @@ constexpr xlen_t SATP_SV39 = 8ull << 60;
 constexpr vaddr_t USER_BASE = 0x1000000;
 
 process *create_process(span<const uint8_t> image);
+void destroy_process(process *);
 void chprio(process *, ProcPrio, bool = true);
 void suspend(process *, bool = true);
 void resume(process *, bool = true);

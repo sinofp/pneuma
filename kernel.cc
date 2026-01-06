@@ -31,14 +31,11 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     queue_init();
     interrupt_init();
 
+    mem::init();
+
     printf("hello %s\n", "world!");
     // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
     printf("1 + 2 = %d, 0x%lx, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
-
-    auto paddr0 = alloc_pages(1);
-    auto paddr1 = alloc_pages(2);
-    printf("alloc_pages test: paddr0=0x%lx\n", paddr0);
-    printf("alloc_pages test: paddr1=0x%lx\n", paddr1);
 
     idle_proc = create_process({ nullptr, 0 });
     // Set the idle process running manually, so it can be saved to readyq in reschedule
@@ -65,9 +62,9 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
 
-    resume(proc_b, false);
-    resume(proc_a, false);
-    // resume(shell, false);
+    // resume(proc_b, false);
+    // resume(proc_a, false);
+    resume(shell, false);
     reschedule();
 
     // for (int i = 0; i < 5; ++i) {

@@ -56,30 +56,32 @@ process *create_process(span<const uint8_t> image) {
     // *ctx = {};
     ctx->ra = reinterpret_cast<xlen_t>(user_entry);
 
+    using enum pte_t::flag;
+
     // Identical mapping for kernel pages, prepared for user's syscalls.
     // Map everything from __kernel_base to __free_ram_end.
     // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
-    // dynamically allocated areas managed by alloc_pages
-    auto *page_table = reinterpret_cast<paddr_t *>(alloc_pages(1));
+    // dynamically allocated areas managed by alloc_frame
+    pt_t page_table{ alloc_frame() };
     for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < static_cast<vaddr_t>(free_ram_end);
          kaddr += PAGE_SIZE)
-        map_page(page_table, kaddr, kaddr, PAGE_R | PAGE_W | PAGE_X);
+        map_page(page_table, kaddr, kaddr, R | W | X);
 
     // Map virtio-block MMIO
-    map_page(page_table, virtio_blk_base, virtio_blk_base, PAGE_R | PAGE_W);
+    map_page(page_table, virtio_blk_base, virtio_blk_base, R | W);
 
     // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
     for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
-        map_page(page_table, plic_addr, plic_addr, PAGE_R | PAGE_W);
+        map_page(page_table, plic_addr, plic_addr, R | W);
 
     // Map user pages.
     for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
-        paddr_t page = alloc_pages(1);
+        paddr_t page = alloc_frame();
 
         // Fill and map the page.
         auto chunk = image.subspan(offset, min(PAGE_SIZE, image.size() - offset));
         memcpy((void *) page, chunk.data(), chunk.size());
-        map_page(page_table, USER_BASE + offset, page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+        map_page(page_table, USER_BASE + offset, page, U | R | W | X);
     }
 
     // Initialize fields.
@@ -93,6 +95,11 @@ process *create_process(span<const uint8_t> image) {
     proc->state = SUSPENDED;
     proc->page_table = page_table;
     return proc;
+}
+
+void destroy_process(process *proc) {
+    destroy_page_table(proc->page_table);
+    proc->page_table = {};
 }
 
 // No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.

@@ -188,6 +188,7 @@
             ./optional.h
             ./debug.h
             ./fdt.h
+            ./pagetable.h
           ];
           linkerScripts = [
             ./user.ld

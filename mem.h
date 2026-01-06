@@ -1,16 +1,17 @@
 #pragma once
 
 #include "kernel.h"
+#include "pagetable.h"
 
-paddr_t alloc_pages(size_t);
+paddr_t alloc_frame();
+void free_frame(paddr_t);
 
-void map_page(paddr_t *, vaddr_t, paddr_t, uint32_t);
+void map_page(pt_t &, vaddr_t, paddr_t, pte_t::flag);
+void destroy_page_table(pt_t &);
+
+namespace mem {
+void init();
+}
 
 extern uint8_t __kernel_base[], __free_ram[];
 extern paddr_t free_ram_end;
-
-constexpr unsigned PAGE_V = 1 << 0; // "Valid" bit (entry is enabled)
-constexpr unsigned PAGE_R = 1 << 1; // Readable
-constexpr unsigned PAGE_W = 1 << 2; // Writable
-constexpr unsigned PAGE_X = 1 << 3; // Executable
-constexpr unsigned PAGE_U = 1 << 4; // User (accessible in user mode)

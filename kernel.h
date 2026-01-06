@@ -29,9 +29,6 @@ using paddr_t = uintptr_t;
 #define align_up(value, align) __builtin_align_up(value, align)
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
-// The same for both Sv32 and Sv39
-constexpr size_t PAGE_SIZE = 4096;
-
 namespace mmio {
 // TODO concept to restrict T to uint32_t and uint64_t
 template <typename T> inline auto read(paddr_t addr) { return *reinterpret_cast<volatile T *>(addr); }

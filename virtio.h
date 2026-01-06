@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kernel.h"
+#include "pagetable.h"
 
 void virtio_blk_init();
 void read_write_disk(void *, uint64_t, int);
@@ -11,6 +12,7 @@ constexpr size_t VIRTQ_ENTRY_NUM = 16;
 constexpr uint32_t VIRTIO_DEVICE_BLK = 2;
 
 extern paddr_t virtio_blk_base;
+extern paddr_t blk_vq_paddr; // Allocated in mem::init
 
 constexpr size_t VIRTIO_REG_MAGIC = 0x00;
 constexpr size_t VIRTIO_REG_VERSION = 0x04;

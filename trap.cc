@@ -176,8 +176,8 @@ void handle_syscall(trap_frame *f) {
         break;
     case SYS_EXIT:
         printf("process %d exited\n", current_proc->pid);
+        destroy_process(current_proc);
         current_proc->state = ProcState::UNUSED;
-        // TODO free resources of exited proc
         reschedule();
         PANIC("unreachable");
     case SYS_READFILE:
