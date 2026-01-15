@@ -80,9 +80,27 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
 [[using gnu: section(".text.boot"), naked]]
 void boot() {
-    asm volatile("mv sp, %[stack_top]\n" // Set the stack pointer
-                 "j kernel_main\n"       // Jump to the kernel main function
-                 :
-                 : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
+    // Don't use inline asm constraints because the compiler generates preambles before the header maigc
+    asm volatile(
+        // Boot image header for U-Boot: https://www.kernel.org/doc/html/latest/arch/riscv/boot-image-header.html
+        ".option push\n"
+        ".option norvc\n"                      // Disable compressed instructions
+        "j __after_image_header\n"             // u32 Executable code
+        ".option pop\n"                        //
+        ".word 0\n"                            // u32 Executable code
+        ".dword 0x200000\n"                    // u64 Image load offset (+2MB = 0x80200000)
+        ".dword __image_end - __kernel_base\n" // u64 effective Image size (text + rodata + data + bss)
+        ".dword 0\n"                           // u64 kernel flags: 0 for LE kernel endian
+        ".word 2\n"                            // u32 Version of this header
+        ".word 0\n"                            // u32 Reserved
+        ".dword 0\n"                           // u64 Reserved
+        ".ascii \"RISCV\\x00\\x00\\x00\"\n"    // u64 (8-char) Magic number, little endian, "RISCV"
+        ".word 0x05435352\n"                   // u32 Magic number 2, little endian, "RSC\x05"
+        ".word 0\n"                            // u32 Reserved for PE COFF offset
+
+        // Actual boot code
+        "__after_image_header:\n"
+        "la sp, __stack_top\n" // Load stack top address
+        "j kernel_main\n"      // Jump to the kernel main function
     );
 }

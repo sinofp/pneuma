@@ -37,6 +37,7 @@ public:
         : storage({ nullptr, 0 })
         , count(0) {}
 
+    // TODO replace by default ctor and move?
     void reset(span<paddr_t> space) {
         storage = space;
         count = 0;

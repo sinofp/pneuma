@@ -3,6 +3,7 @@
 *.pdf
 *.log
 *.tar
+*.img
 result-*
 compile_commands.json
 .gdb_history

@@ -24,6 +24,8 @@ SECTIONS {
     }
 
     . = ALIGN(4);
+    __image_end = .;
+
     . += 128 * 1024; /* 128KB */
     __stack_top = .;
 

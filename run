@@ -110,11 +110,31 @@ pushd disk
 tar cf ../disk.tar --format=ustar *.txt
 popd
 
+# Create boot disk for U-Boot if needed
+local boot_disk_args=""
+if [[ $use_uboot == true ]] {
+    local boot_img=boot-${arch}.img
+    echo "Creating boot disk image: $boot_img"
+
+    # Create disk image and format as FAT32 (whole-disk, no partition table)
+    dd if=/dev/zero of=$boot_img bs=1M count=16 2>/dev/null
+    mkfs.vfat -F 32 $boot_img >/dev/null
+
+    # Copy Image to boot disk
+    mcopy -i $boot_img result-${arch}/Image ::Image
+
+    # Add boot disk as second virtio-blk device
+    # For some unknown reason, the second device is viewed as the first by U-Boot
+    boot_disk_args="-drive id=boot,file=$boot_img,format=raw,if=none \
+      -device virtio-blk-device,drive=boot,bus=virtio-mmio-bus.1"
+}
+
 local qemu_common_args="-machine $qemu_machine \
       -bios $opensbi_fw -kernel $qemu_kernel \
       --no-reboot -nographic -serial mon:stdio \
       -drive id=drive0,file=disk.tar,format=raw,if=none \
-      -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0"
+      -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
+      $boot_disk_args"
 
 if [[ $use_dts == true && $use_uboot == true ]] {
     local uboot_dts=virt-${arch}-uboot.dts
@@ -140,7 +160,13 @@ if [[ $use_dts == true && $use_uboot == false ]] {
     exit
 }
 
-if [[ $debug == true ]] {
+if [[ $use_uboot == true && $debug == false ]] {
+    echo "Running ${arch:u} via OpenSBI + U-Boot..."
+
+    # TODO Running expect catches C-a prefix for QEMU
+    ./uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
+
+} elif [[ $debug == true ]] {
     echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
     # Get the compilation directory from debug info for source mapping

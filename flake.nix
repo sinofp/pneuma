@@ -59,7 +59,10 @@
               inherit defconfig;
               extraMeta.platforms = [ system ];
               OPENSBI = "${opensbi}/share/opensbi/lp64/generic/firmware/fw_dynamic.bin";
-              filesToInstall = [ "u-boot.bin" ];
+              filesToInstall = [
+                "u-boot.bin"
+                "tools/mkimage"
+              ];
               extraMakeFlags = [
                 "LLVM=1"
                 "LLVM_IAS=1"
@@ -117,6 +120,8 @@
                 uringSupport = false;
               })
               dtc
+              dosfstools # mkfs.vfat
+              mtools # mcopy
             ];
 
             shellHook = ''
@@ -124,12 +129,13 @@
               export UBOOT_QEMU="${ubootQemu}/u-boot.bin"
               export CLANG="${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang"
               export LLD="${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
-              export PATH="$PWD:$PATH" # run, fmt
+              export PATH="${ubootQemu}:$PWD:$PATH" # mkimage (from U-Boot), run, fmt
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"
               echo "LLD: $LLD"
               echo "OpenSBI firmware: $QEMU_OPENSBI"
               echo "U-Boot (QEMU): $UBOOT_QEMU"
+              echo "mkimage: ${ubootQemu}/mkimage"
             '';
           };
         }
@@ -284,6 +290,9 @@
                   -o $out/kernel.elf \
                   ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} \
                   $out/shell.bin.o $out/user-a.bin.o $out/user-b.bin.o
+
+                # Generate Image file for U-Boot booti
+                ${objcopy} -O binary $out/kernel.elf $out/Image
               '';
 
           # Helper function to generate compile_commands.json for clangd

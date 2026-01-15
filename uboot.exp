@@ -1,0 +1,22 @@
+#!/usr/bin/env expect
+
+set timeout -1
+
+spawn {*}$argv
+
+expect {
+    "Hit any key to stop autoboot" {
+        send "\r"
+        exp_continue
+    }
+    "=> " {
+        send "virtio scan\r"
+        expect "=> "
+	# 0:0 for the boot disk w/o partition table
+        send "fatload virtio 0:0 \${kernel_addr_r} Image\r"
+        expect "=> "
+        send "booti \${kernel_addr_r} - \${fdtcontroladdr}\r"
+        expect eof
+    }
+    eof
+}
