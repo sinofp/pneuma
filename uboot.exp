@@ -16,7 +16,7 @@ expect {
         send "fatload virtio 0:0 \${kernel_addr_r} Image\r"
         expect "=> "
         send "booti \${kernel_addr_r} - \${fdtcontroladdr}\r"
-        expect eof
+        interact
     }
     eof
 }

@@ -92,6 +92,11 @@ using fdt::uninitialised;
 
 paddr_t virtio_blk_base = uninitialised; // 0x10001000;
 
+namespace fdt {
+virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
+size_t virtio_device_count = 0;
+} // namespace fdt
+
 namespace plic {
 uint32_t VIRTIO_BLK_IRQ = uninitialised; // 1;
 paddr_t start_addr = uninitialised;      // 0x0c000000;
@@ -167,7 +172,14 @@ void init(const header *fdt_ptr) {
                 PANIC("FDT_END_NODE before the first FDT_BEGIN_NODE");
             const node_ctx &ctx = stack[depth];
             if (ctx.is_virtio and ctx.reg_set and ctx.irq_set) {
-                if (!virtio_found || ctx.reg_addr < virtio_first) {
+                // Collect all virtio devices
+                if (virtio_device_count < MAX_VIRTIO_DEVICES) {
+                    virtio_devices[virtio_device_count].mmio_base = static_cast<paddr_t>(ctx.reg_addr);
+                    virtio_devices[virtio_device_count].irq = ctx.irq;
+                    virtio_device_count++;
+                }
+                // For backward compatibility, keep the first one
+                if (!virtio_found or ctx.reg_addr < virtio_first) {
                     virtio_found = true;
                     virtio_first = ctx.reg_addr;
                     virtio_blk_base = static_cast<paddr_t>(ctx.reg_addr);
