@@ -23,9 +23,9 @@ file files[FILES_MAX];
 extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     memset(__bss, 0, __bss_end - __bss);
     fdt::init(fdt_ptr);
-    printf("\n\ndtb:\n  ptr=%p, virtio_base=0x%lx, virtio_irq=%d, plic_base=0x%lx, free_ram_end=0x%lx\n", fdt_ptr,
-           static_cast<unsigned long>(virtio_blk_base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
-           static_cast<unsigned long>(plic::start_addr), free_ram_end);
+    printf("\n\ndtb:\n  ptr=%p, virtio_base=0x%lx, virtio_irq=%d, plic_base=0x%lx, __free_ram=%p, free_ram_end=0x%lx\n",
+           fdt_ptr, static_cast<unsigned long>(virtio_blk_base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
+           static_cast<unsigned long>(plic::start_addr), reinterpret_cast<paddr_t>(__free_ram), free_ram_end);
 
     // TODO make xxx_int xxx::init
     queue_init();

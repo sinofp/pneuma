@@ -33,6 +33,13 @@ int strcmp(const char *s1, const char *s2) {
     return *s1 - *s2;
 }
 
+size_t strlen(const char *s) {
+    size_t i;
+    for (i = 0; '\0' != s[i]; ++i) {
+    }
+    return i;
+}
+
 namespace {
 template <typename T> void print_hex(T value) {
     // If i is auto (size_t), --i will also be positive

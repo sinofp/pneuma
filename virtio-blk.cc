@@ -1,9 +1,9 @@
+#include "fdt.h"
 #include "kernel.h"
 #include "mem.h"
+#include "plic.h"
 #include "proc.h"
 #include "virtio.h"
-#include "fdt.h"
-#include "plic.h"
 
 virtio_virtq *blk_request_vq;
 virtio_blk_req *blk_req;
@@ -70,8 +70,8 @@ void virtio_blk_init() {
         // Read capacity directly from config space without initializing the device
         // We avoid resetting devices here to prevent interfering with U-Boot's boot disk
         auto capacity = mmio::read<uint64_t>(base, VIRTIO_REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
-        printf("  Device %ld: MMIO=0x%lx, capacity=%ld bytes\n", static_cast<long>(i),
-               static_cast<unsigned long>(base), static_cast<long>(capacity));
+        printf("  Device %ld: MMIO=0x%lx, capacity=%ld bytes\n", static_cast<long>(i), static_cast<unsigned long>(base),
+               static_cast<long>(capacity));
 
         // Select the smallest capacity device (disk.tar)
         if (capacity < smallest_capacity) {

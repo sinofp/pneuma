@@ -2,6 +2,8 @@
 #include "common.h"
 #include "span.h"
 
+extern uint8_t __kernel_base[];
+
 namespace {
 
 enum class FDT : uint32_t {
@@ -53,6 +55,17 @@ struct cell_view {
     }
 };
 
+bool startswith(const char *string, const char *value) {
+    auto i = strlen(string);
+    auto len = strlen(value);
+    if (i < len)
+        return false;
+    for (i = 0; i != len; ++i)
+        if (string[i] != value[i])
+            return false;
+    return true;
+}
+
 bool compat_has(const char *data, uint32_t len, const char *target) {
     // "compatible" is a list of NUL-terminated strings packed back-to-back.
     uint32_t i = 0;
@@ -75,6 +88,7 @@ struct node_ctx {
     int address_cells = -1;
     int size_cells = -1;
     bool is_memory;
+    bool is_rsvd_memory;
     bool is_cpus;
     bool is_virtio;
     bool is_plic;
@@ -163,8 +177,8 @@ void init(const header *fdt_ptr) {
             else
                 PANIC("FDT exceeds maximum depth");
             stack[depth].is_cpus = !strcmp(name, "cpus");
-            // TODO add string startwidth to parse memory, and mmode_resv for U-Boot reserved memory
-            stack[depth].is_memory = !strcmp(name, "memory@80000000");
+            stack[depth].is_memory = startswith(name, "memory@");
+            stack[depth].is_rsvd_memory = !strcmp(name, "reserved-memory");
             continue;
         }
         case FDT::END_NODE: {
@@ -194,6 +208,12 @@ void init(const header *fdt_ptr) {
                 free_ram_end = ctx.reg_addr + ctx.reg_size;
                 // printf("fdt::init: memory addr: 0x%lx, size: 0x%lx, calculated free_ram_end: %p\n", ctx.reg_addr,
                 //        ctx.reg_size, free_ram_end);
+            }
+            if (0 < depth and stack[depth - 1].is_rsvd_memory) {
+                // We assume reserved memories are allocated at the start of RAM
+                auto kernel_base = reinterpret_cast<paddr_t>(__kernel_base);
+                if (ctx.reg_addr < kernel_base and kernel_base < (ctx.reg_addr + ctx.reg_size))
+                    PANIC("reserved memory overlaps with __kernel_base");
             }
             --depth;
             continue;
