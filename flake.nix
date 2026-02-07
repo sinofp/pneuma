@@ -162,21 +162,17 @@
             ./qtab.cc
             ./fdt.cc
           ];
-          shellSources = [
-            ./user.cc
-            ./common.cc
-            ./shell.cc
+          libcSources = [
+            ./libc/src/crt0.cc
+            ./libc/src/syscall.cc
+            ./libc/src/stdio.cc
+            ./libc/src/stdlib.cc
+            ./libc/src/string.cc
+            ./libc/src/misc.cc
           ];
-          userASources = [
-            ./user.cc
-            ./common.cc
-            ./user-a.cc
-          ];
-          userBSources = [
-            ./user.cc
-            ./common.cc
-            ./user-b.cc
-          ];
+          shellSources = libcSources ++ [ ./shell.cc ];
+          userASources = libcSources ++ [ ./user-a.cc ];
+          userBSources = libcSources ++ [ ./user-b.cc ];
           headers = [
             ./kernel.h
             ./common.h
@@ -186,7 +182,6 @@
             ./mem.h
             ./sbi.h
             ./proc.h
-            ./user.h
             ./trap.h
             ./csr.h
             ./plic.h
@@ -196,14 +191,29 @@
             ./fdt.h
             ./pagetable.h
           ];
+          libcHeaders = [
+            ./libc/include/sys/syscall.h
+            ./libc/include/sys/misc.h
+            ./libc/include/stdio.h
+            ./libc/include/stdlib.h
+            ./libc/include/string.h
+            ./libc/include/stdarg.h
+          ];
           linkerScripts = [
             ./user.ld
             ./kernel.ld
           ];
 
-          # All source files with duplicates removed
-          allSourcePaths = pkgs.lib.unique (
-            kernelSources ++ shellSources ++ userASources ++ userBSources ++ headers ++ linkerScripts
+          # All source files with duplicates removed (flat files only)
+          flatSourcePaths = pkgs.lib.unique (
+            kernelSources
+            ++ headers
+            ++ linkerScripts
+            ++ [
+              ./shell.cc
+              ./user-a.cc
+              ./user-b.cc
+            ]
           );
 
           # Helper to get just the filename from a path
@@ -217,6 +227,7 @@
               # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
               pie = if arch == "riscv64" then "-fPIE" else "";
               ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie}";
+              userCcflags = "${ccflags} -nostdlibinc -isystem libc/include";
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
@@ -228,16 +239,30 @@
               ''
                 mkdir -p $out
 
-                # Copy all source files automatically using Nix paths
-                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} ${basename path}") allSourcePaths}
+                # Copy flat source files
+                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} ${basename path}") flatSourcePaths}
+
+                # Copy libc directory structure
+                mkdir -p libc/include/sys libc/src
+                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} libc/src/${basename path}") libcSources}
+                ${pkgs.lib.concatMapStringsSep "\n" (
+                  path:
+                  let
+                    name = basename path;
+                  in
+                  if name == "syscall.h" || name == "misc.h" then
+                    "cp ${path} libc/include/sys/${name}"
+                  else
+                    "cp ${path} libc/include/${name}"
+                ) libcHeaders}
 
                 # Build shell.elf (for debugging symbols)
-                ${clang} ${ccflags} \
+                ${clang} ${userCcflags} \
                   --ld-path=${lld} \
                   -Wl,-Tuser.ld \
                   -Wl,-Map=$out/shell.map \
                   -o $out/shell.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename shellSources)}
+                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} shell.cc
 
                 # Convert shell.elf to binary
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
@@ -249,12 +274,12 @@
                 popd
 
                 # Build user-a.elf (for debugging symbols)
-                ${clang} ${ccflags} \
+                ${clang} ${userCcflags} \
                   --ld-path=${lld} \
                   -Wl,-Tuser.ld \
                   -Wl,-Map=$out/user-a.map \
                   -o $out/user-a.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename userASources)}
+                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user-a.cc
 
                 # Convert user-a.elf to binary
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
@@ -266,12 +291,12 @@
                 popd
 
                 # Build user-b.elf (for debugging symbols)
-                ${clang} ${ccflags} \
+                ${clang} ${userCcflags} \
                   --ld-path=${lld} \
                   -Wl,-Tuser.ld \
                   -Wl,-Map=$out/user-b.map \
                   -o $out/user-b.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename userBSources)}
+                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user-b.cc
 
                 # Convert user-b.elf to binary
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
@@ -302,19 +327,35 @@
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
               ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+              userCcflags = "${ccflags} -nostdlibinc -isystem libc/include";
 
-              # All unique source files (just basenames)
-              allSources = pkgs.lib.unique (kernelSources ++ shellSources ++ userASources ++ userBSources);
-
-              # Generate a compile command entry for each source file
-              # Use current directory (.) which clangd will resolve relative to compile_commands.json location
-              mkEntry = src: {
+              # Generate entries for kernel sources
+              kernelEntries = map (src: {
                 directory = ".";
                 command = "${clang} ${ccflags} -c ${basename src}";
                 file = "${basename src}";
-              };
+              }) kernelSources;
 
-              entries = map mkEntry allSources;
+              # Generate entries for libc sources (need -isystem libc/include)
+              libcEntries = map (src: {
+                directory = ".";
+                command = "${clang} ${userCcflags} -c libc/src/${basename src}";
+                file = "libc/src/${basename src}";
+              }) libcSources;
+
+              # Generate entries for user programs (need -isystem libc/include)
+              userPrograms = [
+                ./shell.cc
+                ./user-a.cc
+                ./user-b.cc
+              ];
+              userEntries = map (src: {
+                directory = ".";
+                command = "${clang} ${userCcflags} -c ${basename src}";
+                file = "${basename src}";
+              }) userPrograms;
+
+              entries = kernelEntries ++ libcEntries ++ userEntries;
               jsonContent = builtins.toJSON entries;
 
             in

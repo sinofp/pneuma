@@ -62,8 +62,8 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
 
-    // resume(proc_b, false);
-    // resume(proc_a, false);
+    resume(proc_b, false);
+    resume(proc_a, false);
     resume(shell, false);
     reschedule();
 

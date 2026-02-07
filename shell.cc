@@ -1,4 +1,7 @@
-#include "user.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/misc.h>
 
 extern "C" void main(void) {
     for (;;) {
@@ -45,7 +48,7 @@ extern "C" void main(void) {
             auto p = reinterpret_cast<int *>(1234);
             *p = 5678;
         } else if (strcmp(cmdline, "exit") == 0 || strcmp(cmdline, "q") == 0)
-            exit();
+            exit(0);
         else
             printf("unknown command: %s\n", cmdline);
     }
