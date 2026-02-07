@@ -1,10 +1,10 @@
-#include "proc.h"
-#include "csr.h"
-#include "debug.h"
-#include "mem.h"
-#include "plic.h"
-#include "qtab.h"
-#include "virtio.h"
+#include "proc/proc.h"
+#include "trap/csr.h"
+#include "lib/debug.h"
+#include "mem/mem.h"
+#include "trap/plic.h"
+#include "proc/qtab.h"
+#include "dev/virtio.h"
 
 process procs[PROCS_MAX]; // All process control structures.
 

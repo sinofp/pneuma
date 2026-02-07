@@ -1,4 +1,4 @@
-#include "qtab.h"
+#include "proc/qtab.h"
 
 qent qtab[NQENT];
 

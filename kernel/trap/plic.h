@@ -1,6 +1,7 @@
 #pragma once
 
-#include "kernel.h"
+#include "dev/mmio.h"
+#include "lib/types.h"
 
 namespace plic {
 
@@ -11,6 +12,7 @@ static_assert(quantity <= 132, "U74 only has 1 to 132 PLIC sources");
 
 constexpr size_t spacing = 4;
 
+// Parsed in fdt.cc
 extern paddr_t start_addr;
 extern paddr_t end_addr;
 

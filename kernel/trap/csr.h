@@ -1,7 +1,7 @@
 #pragma once
 
-#include "kernel.h"
-#include "pagetable.h"
+#include "fdt/fdt.h"
+#include "mem/pagetable.h"
 
 namespace csr {
 

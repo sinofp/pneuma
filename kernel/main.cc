@@ -1,22 +1,13 @@
-#include "kernel.h"
-#include "common.h"
-#include "csr.h"
-#include "fdt.h"
-#include "file.h"
-#include "mem.h"
-#include "plic.h"
-#include "proc.h"
-#include "qtab.h"
-#include "sbi.h"
-#include "trap.h"
-#include "virtio.h"
-
-extern uint8_t __bss[], __bss_end[], __stack_top[];
-
-// Embedded user program binaries (from *.bin.o files)
-extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
-extern uint8_t _binary_a_bin_start[], _binary_a_bin_size[];
-extern uint8_t _binary_b_bin_start[], _binary_b_bin_size[];
+#include "dev/sbi.h"
+#include "dev/virtio.h"
+#include "fdt/fdt.h"
+#include "fs/file.h"
+#include "lib/symbols.h"
+#include "mem/mem.h"
+#include "proc/proc.h"
+#include "proc/qtab.h"
+#include "trap/plic.h"
+#include "trap/trap.h"
 
 file files[FILES_MAX];
 

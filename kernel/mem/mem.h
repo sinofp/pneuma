@@ -1,7 +1,6 @@
 #pragma once
 
-#include "kernel.h"
-#include "pagetable.h"
+#include "mem/pagetable.h"
 
 paddr_t alloc_frame();
 void free_frame(paddr_t);

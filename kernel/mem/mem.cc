@@ -1,6 +1,6 @@
-#include "mem.h"
-#include "span.h"
-#include "virtio.h"
+#include "mem/mem.h"
+#include "dev/virtio.h"
+#include "lib/span.h"
 
 namespace {
 // Everything [bump_paddr, free_ram_end) will be managed by free stack

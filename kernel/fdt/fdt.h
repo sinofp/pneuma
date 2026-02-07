@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kernel.h"
+#include "lib/types.h"
 
 namespace fdt {
 
@@ -20,3 +20,7 @@ extern virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
 extern size_t virtio_device_count;
 
 } // namespace fdt
+
+// Clock frequencies extracted from device tree
+extern uint32_t clk_freq_ms;
+extern uint32_t clk_freq_us;

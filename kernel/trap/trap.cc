@@ -1,12 +1,12 @@
-#include "trap.h"
-#include "csr.h"
-#include "debug.h"
-#include "file.h"
-#include "plic.h"
-#include "proc.h"
-#include "qtab.h"
-#include "sbi.h"
-#include "virtio.h"
+#include "trap/trap.h"
+#include "trap/csr.h"
+#include "lib/debug.h"
+#include "fs/file.h"
+#include "trap/plic.h"
+#include "proc/proc.h"
+#include "proc/qtab.h"
+#include "dev/sbi.h"
+#include "dev/virtio.h"
 
 constexpr uint64_t timer_interrupt_ms = 5;
 constexpr int64_t quantum = 1;

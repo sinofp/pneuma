@@ -145,23 +145,27 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          lib = pkgs.lib;
           clang = "${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang";
           objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
-          # Source file lists (using Nix path syntax)
-          kernelSources = [
-            ./kernel.cc
-            ./proc.cc
-            ./mem.cc
-            ./sbi.cc
-            ./common.cc
-            ./virtio-blk.cc
-            ./ustar.cc
-            ./trap.cc
-            ./qtab.cc
-            ./fdt.cc
-          ];
+          # Helper to find files recursively
+          findFiles = dir: suffix:
+            let
+              contents = builtins.readDir dir;
+              processEntry = name: type:
+                let path = dir + "/${name}"; in
+                if type == "directory" then findFiles path suffix
+                else if lib.hasSuffix suffix name then [ path ]
+                else [];
+            in builtins.concatLists (lib.mapAttrsToList processEntry contents);
+
+          # Glob all kernel sources and headers
+          kernelSources = findFiles ./kernel ".cc";
+          kernelHeaders = findFiles ./kernel ".h";
+
+          # Source file lists for libc and user programs
           libcSources = [
             ./libc/src/crt0.cc
             ./libc/src/syscall.cc
@@ -175,24 +179,6 @@
             ./user/a.cc
             ./user/b.cc
           ];
-          headers = [
-            ./kernel.h
-            ./common.h
-            ./span.h
-            ./virtio.h
-            ./file.h
-            ./mem.h
-            ./sbi.h
-            ./proc.h
-            ./trap.h
-            ./csr.h
-            ./plic.h
-            ./qtab.h
-            ./optional.h
-            ./debug.h
-            ./fdt.h
-            ./pagetable.h
-          ];
           libcHeaders = [
             ./libc/include/sys/syscall.h
             ./libc/include/sys/misc.h
@@ -201,20 +187,17 @@
             ./libc/include/string.h
             ./libc/include/stdarg.h
           ];
-          linkerScripts = [
-            ./user/user.ld
-            ./kernel.ld
-          ];
-
-          # All source files with duplicates removed (flat files only)
-          flatSourcePaths = pkgs.lib.unique (
-            kernelSources
-            ++ headers
-            ++ [./kernel.ld]
-          );
 
           # Helper to get just the filename from a path
           basename = path: builtins.baseNameOf (toString path);
+
+          # Get relative path within kernel directory
+          kernelRelPath = path:
+            let
+              pathStr = toString path;
+              kernelDir = toString ./kernel + "/";
+            in
+            lib.removePrefix kernelDir pathStr;
 
           # Helper function to build kernel with embedded shell for a specific architecture
           mkKernel =
@@ -223,8 +206,8 @@
               cfg = archConfigs.${arch};
               # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
               pie = if arch == "riscv64" then "-fPIE" else "";
-              ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie}";
-              userCcflags = "${ccflags} -nostdlibinc -isystem libc/include";
+              ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -I kernel";
+              userCcflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -nostdlibinc -isystem libc/include";
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
@@ -236,13 +219,14 @@
               ''
                 mkdir -p $out
 
-                # Copy flat source files
-                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} ${basename path}") flatSourcePaths}
+                # Copy kernel directory structure
+                cp -r ${./kernel} kernel
+                chmod -R u+w kernel
 
                 # Copy libc directory structure
                 mkdir -p libc/include/sys libc/src
-                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} libc/src/${basename path}") libcSources}
-                ${pkgs.lib.concatMapStringsSep "\n" (
+                ${lib.concatMapStringsSep "\n" (path: "cp ${path} libc/src/${basename path}") libcSources}
+                ${lib.concatMapStringsSep "\n" (
                   path:
                   let
                     name = basename path;
@@ -255,13 +239,13 @@
 
                 # Copy user directory
                 mkdir -p user
-                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
+                ${lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
                 cp ${./user/user.ld} user/user.ld
 
                 # Build user programs
-                ${pkgs.lib.concatMapStringsSep "\n" (prog:
+                ${lib.concatMapStringsSep "\n" (prog:
                   let
-                    name = pkgs.lib.removeSuffix ".cc" (basename prog);
+                    name = lib.removeSuffix ".cc" (basename prog);
                   in ''
                 # Build ${name}.elf
                 ${clang} ${userCcflags} \
@@ -269,7 +253,7 @@
                   -Wl,-Tuser/user.ld \
                   -Wl,-Map=$out/${name}.map \
                   -o $out/${name}.elf \
-                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
+                  ${lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
 
                 # Convert to binary and ELF object
                 ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
@@ -282,11 +266,11 @@
                 # Build kernel.elf with embedded user programs
                 ${clang} ${ccflags} \
                   --ld-path=${lld} \
-                  -Wl,-Tkernel.ld \
+                  -Wl,-Tkernel/kernel.ld \
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
-                  ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} \
-                  ${pkgs.lib.concatStringsSep " " (map (prog: "$out/${pkgs.lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms)}
+                  ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
+                  ${lib.concatStringsSep " " (map (prog: "$out/${lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms)}
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image
@@ -298,14 +282,14 @@
             let
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
-              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
-              userCcflags = "${ccflags} -nostdlibinc -isystem libc/include";
+              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -I kernel";
+              userCcflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
 
               # Generate entries for kernel sources
               kernelEntries = map (src: {
                 directory = ".";
-                command = "${clang} ${ccflags} -c ${basename src}";
-                file = "${basename src}";
+                command = "${clang} ${ccflags} -c kernel/${kernelRelPath src}";
+                file = "kernel/${kernelRelPath src}";
               }) kernelSources;
 
               # Generate entries for libc sources (need -isystem libc/include)

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common.h"
-#include "virtio.h"
+#include "lib/common.h"
+#include "dev/virtio.h"
 
 void fs_init();
 void fs_flush();

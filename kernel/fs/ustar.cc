@@ -1,5 +1,5 @@
-#include "file.h"
-#include "kernel.h"
+#include "fs/file.h"
+#include "lib/common.h"
 
 uint8_t disk[DISK_MAX_SIZE];
 

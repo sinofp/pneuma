@@ -1,7 +1,7 @@
 #pragma once
 
-#include "kernel.h"
-#include "span.h"
+#include "lib/common.h"
+#include "lib/span.h"
 
 // The same for both Sv32 and Sv39
 constexpr size_t PAGE_SIZE = 4096;

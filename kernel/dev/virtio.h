@@ -1,7 +1,6 @@
 #pragma once
 
-#include "kernel.h"
-#include "pagetable.h"
+#include "mem/pagetable.h"
 
 void virtio_blk_init();
 void read_write_disk(void *, uint64_t, int);

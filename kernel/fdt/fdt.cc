@@ -1,8 +1,8 @@
-#include "fdt.h"
-#include "common.h"
-#include "span.h"
-
-extern uint8_t __kernel_base[];
+#include "fdt/fdt.h"
+#include "lib/common.h"
+#include "lib/span.h"
+#include "lib/symbols.h"
+#include "trap/plic.h"
 
 namespace {
 
@@ -114,7 +114,7 @@ size_t virtio_device_count = 0;
 namespace plic {
 uint32_t VIRTIO_BLK_IRQ = uninitialised; // 1;
 paddr_t start_addr = uninitialised;      // 0x0c000000;
-uint64_t end_addr = uninitialised;       // 0x00600000;
+paddr_t end_addr = uninitialised;        // 0x00600000;
 } // namespace plic
 
 uint32_t clk_freq_sec = uninitialised;

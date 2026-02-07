@@ -1,4 +1,4 @@
-#include "common.h"
+#include "lib/common.h"
 
 void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
     auto *d = static_cast<uint8_t *>(dst);

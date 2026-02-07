@@ -1,9 +1,9 @@
-#include "fdt.h"
-#include "kernel.h"
-#include "mem.h"
-#include "plic.h"
-#include "proc.h"
-#include "virtio.h"
+#include "fdt/fdt.h"
+#include "dev/mmio.h"
+#include "mem/mem.h"
+#include "trap/plic.h"
+#include "proc/proc.h"
+#include "dev/virtio.h"
 
 virtio_virtq *blk_request_vq;
 virtio_blk_req *blk_req;

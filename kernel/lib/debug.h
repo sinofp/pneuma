@@ -1,7 +1,7 @@
 #pragma once
 
-#include "proc.h"
-#include "qtab.h"
+#include "proc/proc.h"
+#include "proc/qtab.h"
 
 inline void print(queue_view (*queue)()) {
     auto q = queue();

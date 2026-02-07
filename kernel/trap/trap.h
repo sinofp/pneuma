@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kernel.h"
+#include "lib/types.h"
 
 void interrupt_init();
 

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "kernel.h"
-#include "pagetable.h"
-#include "span.h"
+#include "mem/pagetable.h"
+#include "lib/span.h"
 
 using pid_t = uint16_t;        // >= log2(PROCS_MAX)
 constexpr pid_t PROCS_MAX = 8; // Maximum number of processes

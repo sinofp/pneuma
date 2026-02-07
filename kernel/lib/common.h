@@ -1,16 +1,14 @@
 #pragma once
 
-// Freestanding headers provided by the compiler (not libc)
-#include <stddef.h> // size_t, ptrdiff_t, nullptr_t
-#include <stdint.h> // uint8_t, uint32_t, uintptr_t, etc.
-
-// 32-bit on RV32, 64-bit on RV64
-using vaddr_t = uintptr_t;
+#include "lib/types.h"
 
 #define va_list __builtin_va_list
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
+
+#define align_up(value, align) __builtin_align_up(value, align)
+#define is_aligned(value, align) __builtin_is_aligned(value, align)
 
 // TODO concept?
 template <typename T> inline T min(T a, T b) { return a < b ? a : b; }
@@ -43,3 +41,10 @@ constexpr unsigned long SYS_WRITEFILE = 5;
 constexpr unsigned long SYS_SLEEP = 6;
 
 constexpr int EOF = -1;
+
+#define PANIC(fmt, ...)                                                       \
+    do {                                                                      \
+        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
+        while (1) {                                                           \
+        }                                                                     \
+    } while (0)

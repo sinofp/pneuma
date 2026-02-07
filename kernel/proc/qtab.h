@@ -1,8 +1,7 @@
 #pragma once
 
-#include "kernel.h"
-#include "optional.h"
-#include "proc.h"
+#include "lib/optional.h"
+#include "proc/proc.h"
 
 using qkey_t = int32_t; // Use int for minus MINKEY TODO better approach
 using qid_t = pid_t;    // Since the index is pid
