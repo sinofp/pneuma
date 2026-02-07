@@ -170,9 +170,11 @@
             ./libc/src/string.cc
             ./libc/src/misc.cc
           ];
-          shellSources = libcSources ++ [ ./shell.cc ];
-          userASources = libcSources ++ [ ./user-a.cc ];
-          userBSources = libcSources ++ [ ./user-b.cc ];
+          userPrograms = [
+            ./user/shell.cc
+            ./user/a.cc
+            ./user/b.cc
+          ];
           headers = [
             ./kernel.h
             ./common.h
@@ -200,7 +202,7 @@
             ./libc/include/stdarg.h
           ];
           linkerScripts = [
-            ./user.ld
+            ./user/user.ld
             ./kernel.ld
           ];
 
@@ -208,12 +210,7 @@
           flatSourcePaths = pkgs.lib.unique (
             kernelSources
             ++ headers
-            ++ linkerScripts
-            ++ [
-              ./shell.cc
-              ./user-a.cc
-              ./user-b.cc
-            ]
+            ++ [./kernel.ld]
           );
 
           # Helper to get just the filename from a path
@@ -256,56 +253,31 @@
                     "cp ${path} libc/include/${name}"
                 ) libcHeaders}
 
-                # Build shell.elf (for debugging symbols)
+                # Copy user directory
+                mkdir -p user
+                ${pkgs.lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
+                cp ${./user/user.ld} user/user.ld
+
+                # Build user programs
+                ${pkgs.lib.concatMapStringsSep "\n" (prog:
+                  let
+                    name = pkgs.lib.removeSuffix ".cc" (basename prog);
+                  in ''
+                # Build ${name}.elf
                 ${clang} ${userCcflags} \
                   --ld-path=${lld} \
-                  -Wl,-Tuser.ld \
-                  -Wl,-Map=$out/shell.map \
-                  -o $out/shell.elf \
-                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} shell.cc
+                  -Wl,-Tuser/user.ld \
+                  -Wl,-Map=$out/${name}.map \
+                  -o $out/${name}.elf \
+                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
 
-                # Convert shell.elf to binary
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                  $out/shell.elf $out/shell.bin
-
-                # Convert binary to ELF object with clean symbol names
+                # Convert to binary and ELF object
+                ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
                 pushd $out
-                ${objcopy} -I binary -O ${cfg.elfFormat} shell.bin shell.bin.o
+                ${objcopy} -I binary -O ${cfg.elfFormat} ${name}.bin ${name}.bin.o
                 popd
-
-                # Build user-a.elf (for debugging symbols)
-                ${clang} ${userCcflags} \
-                  --ld-path=${lld} \
-                  -Wl,-Tuser.ld \
-                  -Wl,-Map=$out/user-a.map \
-                  -o $out/user-a.elf \
-                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user-a.cc
-
-                # Convert user-a.elf to binary
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                  $out/user-a.elf $out/user-a.bin
-
-                # Convert binary to ELF object
-                pushd $out
-                ${objcopy} -I binary -O ${cfg.elfFormat} user-a.bin user-a.bin.o
-                popd
-
-                # Build user-b.elf (for debugging symbols)
-                ${clang} ${userCcflags} \
-                  --ld-path=${lld} \
-                  -Wl,-Tuser.ld \
-                  -Wl,-Map=$out/user-b.map \
-                  -o $out/user-b.elf \
-                  ${pkgs.lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user-b.cc
-
-                # Convert user-b.elf to binary
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary \
-                  $out/user-b.elf $out/user-b.bin
-
-                # Convert binary to ELF object
-                pushd $out
-                ${objcopy} -I binary -O ${cfg.elfFormat} user-b.bin user-b.bin.o
-                popd
+                ''
+                ) userPrograms}
 
                 # Build kernel.elf with embedded user programs
                 ${clang} ${ccflags} \
@@ -314,7 +286,7 @@
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
                   ${pkgs.lib.concatStringsSep " " (map basename kernelSources)} \
-                  $out/shell.bin.o $out/user-a.bin.o $out/user-b.bin.o
+                  ${pkgs.lib.concatStringsSep " " (map (prog: "$out/${pkgs.lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms)}
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image
@@ -344,15 +316,10 @@
               }) libcSources;
 
               # Generate entries for user programs (need -isystem libc/include)
-              userPrograms = [
-                ./shell.cc
-                ./user-a.cc
-                ./user-b.cc
-              ];
               userEntries = map (src: {
                 directory = ".";
-                command = "${clang} ${userCcflags} -c ${basename src}";
-                file = "${basename src}";
+                command = "${clang} ${userCcflags} -c user/${basename src}";
+                file = "user/${basename src}";
               }) userPrograms;
 
               entries = kernelEntries ++ libcEntries ++ userEntries;

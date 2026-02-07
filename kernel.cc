@@ -15,8 +15,8 @@ extern uint8_t __bss[], __bss_end[], __stack_top[];
 
 // Embedded user program binaries (from *.bin.o files)
 extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
-extern uint8_t _binary_user_a_bin_start[], _binary_user_a_bin_size[];
-extern uint8_t _binary_user_b_bin_start[], _binary_user_b_bin_size[];
+extern uint8_t _binary_a_bin_start[], _binary_a_bin_size[];
+extern uint8_t _binary_b_bin_start[], _binary_b_bin_size[];
 
 file files[FILES_MAX];
 
@@ -53,11 +53,11 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(USER_BASE));
 
     // Create user processes
-    auto *proc_a = create_process({ _binary_user_a_bin_start, reinterpret_cast<size_t>(_binary_user_a_bin_size) });
-    printf("Process created: user-a (%d)\n", proc_a->pid);
+    auto *proc_a = create_process({ _binary_a_bin_start, reinterpret_cast<size_t>(_binary_a_bin_size) });
+    printf("Process created: a (%d)\n", proc_a->pid);
 
-    auto *proc_b = create_process({ _binary_user_b_bin_start, reinterpret_cast<size_t>(_binary_user_b_bin_size) });
-    printf("Process created: user-b (%d)\n", proc_b->pid);
+    auto *proc_b = create_process({ _binary_b_bin_start, reinterpret_cast<size_t>(_binary_b_bin_size) });
+    printf("Process created: b (%d)\n", proc_b->pid);
 
     auto *shell = create_process({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);

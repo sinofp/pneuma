@@ -76,8 +76,8 @@ nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
 local shell_elf=result-$arch/shell.elf
-local user_a_elf=result-$arch/user-a.elf
-local user_b_elf=result-$arch/user-b.elf
+local a_elf=result-$arch/a.elf
+local b_elf=result-$arch/b.elf
 
 # U-Boot is only available for RV64
 if [[ $use_uboot == true && $arch != rv64 ]] {
@@ -187,8 +187,8 @@ if [[ $use_uboot == true && $debug == false ]] {
                 -ex 'set confirm off' \
                 -ex 'set substitute-path $kernel_comp_dir "$PWD"' \
                 -ex 'add-symbol-file $shell_elf' \
-                -ex 'add-symbol-file $user_a_elf' \
-                -ex 'add-symbol-file $user_b_elf' \
+                -ex 'add-symbol-file $a_elf' \
+                -ex 'add-symbol-file $b_elf' \
                 -ex 'target remote localhost:1234'
         "
     } else {
@@ -197,8 +197,8 @@ if [[ $use_uboot == true && $debug == false ]] {
             lldb $kernel_elf \
                 -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
                 -o 'image add $shell_elf' \
-                -o 'image add $user_a_elf' \
-                -o 'image add $user_b_elf' \
+                -o 'image add $a_elf' \
+                -o 'image add $b_elf' \
                 -o 'gdb-remote localhost:1234'
         "
     }
