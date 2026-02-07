@@ -1,17 +1,20 @@
 #include "trap/trap.h"
-#include "trap/csr.h"
-#include "lib/debug.h"
-#include "fs/file.h"
-#include "trap/plic.h"
-#include "proc/proc.h"
-#include "proc/qtab.h"
 #include "dev/sbi.h"
 #include "dev/virtio.h"
+#include "fs/file.h"
+#include "lib/debug.h"
+#include "proc/proc.h"
+#include "proc/qtab.h"
+#include "trap/csr.h"
+#include "trap/plic.h"
 
+namespace {
 constexpr uint64_t timer_interrupt_ms = 5;
 constexpr int64_t quantum = 1;
 int64_t preempt = quantum;
+} // namespace
 
+namespace trap {
 [[using gnu: naked, aligned(4)]]
 void kernel_entry() {
     asm volatile(
@@ -143,22 +146,24 @@ void kernel_entry() {
         "sret\n"
         // clang-format on
         :
-        : [size] "i"(static_cast<xlen_t>(sizeof(trap_frame))), [ra] "i"(offsetof(trap_frame, ra)),
-          [gp] "i"(offsetof(trap_frame, gp)), [tp] "i"(offsetof(trap_frame, tp)), [t0] "i"(offsetof(trap_frame, t0)),
-          [t1] "i"(offsetof(trap_frame, t1)), [t2] "i"(offsetof(trap_frame, t2)), [t3] "i"(offsetof(trap_frame, t3)),
-          [t4] "i"(offsetof(trap_frame, t4)), [t5] "i"(offsetof(trap_frame, t5)), [t6] "i"(offsetof(trap_frame, t6)),
-          [a0] "i"(offsetof(trap_frame, a0)), [a1] "i"(offsetof(trap_frame, a1)), [a2] "i"(offsetof(trap_frame, a2)),
-          [a3] "i"(offsetof(trap_frame, a3)), [a4] "i"(offsetof(trap_frame, a4)), [a5] "i"(offsetof(trap_frame, a5)),
-          [a6] "i"(offsetof(trap_frame, a6)), [a7] "i"(offsetof(trap_frame, a7)), [s0] "i"(offsetof(trap_frame, s0)),
-          [s1] "i"(offsetof(trap_frame, s1)), [s2] "i"(offsetof(trap_frame, s2)), [s3] "i"(offsetof(trap_frame, s3)),
-          [s4] "i"(offsetof(trap_frame, s4)), [s5] "i"(offsetof(trap_frame, s5)), [s6] "i"(offsetof(trap_frame, s6)),
-          [s7] "i"(offsetof(trap_frame, s7)), [s8] "i"(offsetof(trap_frame, s8)), [s9] "i"(offsetof(trap_frame, s9)),
-          [s10] "i"(offsetof(trap_frame, s10)), [s11] "i"(offsetof(trap_frame, s11)),
-          [sp] "i"(offsetof(trap_frame, sp)), [sepc] "i"(offsetof(trap_frame, sepc)),
-          [sstatus] "i"(offsetof(trap_frame, sstatus)), [xlen_size] "i"(static_cast<xlen_t>(sizeof(xlen_t))));
+        : [size] "i"(static_cast<xlen_t>(sizeof(frame))), [ra] "i"(offsetof(frame, ra)), [gp] "i"(offsetof(frame, gp)),
+          [tp] "i"(offsetof(frame, tp)), [t0] "i"(offsetof(frame, t0)), [t1] "i"(offsetof(frame, t1)),
+          [t2] "i"(offsetof(frame, t2)), [t3] "i"(offsetof(frame, t3)), [t4] "i"(offsetof(frame, t4)),
+          [t5] "i"(offsetof(frame, t5)), [t6] "i"(offsetof(frame, t6)), [a0] "i"(offsetof(frame, a0)),
+          [a1] "i"(offsetof(frame, a1)), [a2] "i"(offsetof(frame, a2)), [a3] "i"(offsetof(frame, a3)),
+          [a4] "i"(offsetof(frame, a4)), [a5] "i"(offsetof(frame, a5)), [a6] "i"(offsetof(frame, a6)),
+          [a7] "i"(offsetof(frame, a7)), [s0] "i"(offsetof(frame, s0)), [s1] "i"(offsetof(frame, s1)),
+          [s2] "i"(offsetof(frame, s2)), [s3] "i"(offsetof(frame, s3)), [s4] "i"(offsetof(frame, s4)),
+          [s5] "i"(offsetof(frame, s5)), [s6] "i"(offsetof(frame, s6)), [s7] "i"(offsetof(frame, s7)),
+          [s8] "i"(offsetof(frame, s8)), [s9] "i"(offsetof(frame, s9)), [s10] "i"(offsetof(frame, s10)),
+          [s11] "i"(offsetof(frame, s11)), [sp] "i"(offsetof(frame, sp)), [sepc] "i"(offsetof(frame, sepc)),
+          [sstatus] "i"(offsetof(frame, sstatus)), [xlen_size] "i"(static_cast<xlen_t>(sizeof(xlen_t))));
 }
+} // namespace trap
 
-void handle_syscall(trap_frame *f) {
+namespace {
+
+void handle_syscall(trap::frame *f) {
     switch (f->a3) {
     case SYS_PUTCHAR:
         putchar(f->a0);
@@ -175,10 +180,10 @@ void handle_syscall(trap_frame *f) {
         }
         break;
     case SYS_EXIT:
-        printf("process %d exited\n", current_proc->pid);
-        destroy_process(current_proc);
-        current_proc->state = ProcState::UNUSED;
-        reschedule();
+        printf("process %d exited\n", proc::current->pid);
+        proc::destroy(proc::current);
+        proc::current->state = proc::state_t::UNUSED;
+        proc::reschedule();
         PANIC("unreachable");
     case SYS_READFILE:
     case SYS_WRITEFILE: {
@@ -186,13 +191,13 @@ void handle_syscall(trap_frame *f) {
         auto *buf = reinterpret_cast<char *>(f->a1);
         size_t len = f->a2;
 
-        if (FILES_MAX <= i or (i < FILES_MAX and files[i].name[0] == '\0')) {
+        if (FILES_MAX <= i or (i < FILES_MAX and fs::files[i].name[0] == '\0')) {
             printf("file descriptor not found: %d\n", i);
             f->a0 = -1;
             break;
         }
 
-        auto *fl = &files[i];
+        auto *fl = &fs::files[i];
         printf("%s %s\n", (f->a3 == SYS_WRITEFILE) ? "Writing" : "Reading", fl->name);
 
         if (len > sizeof(fl->data))
@@ -201,23 +206,25 @@ void handle_syscall(trap_frame *f) {
         if (f->a3 == SYS_WRITEFILE) {
             memcpy(fl->data, buf, len);
             fl->size = len;
-            fs_flush();
+            fs::ustar::flush();
         } else
             memcpy(buf, fl->data, len);
 
         f->a0 = len;
     } break;
     case SYS_SLEEP:
-        sleep_ms(f->a0);
+        proc::sleep_ms(f->a0);
         break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
 }
 
-inline void set_next_timer_interrupt() { sbi_set_timer(csr::time::read() + timer_interrupt_ms * clk_freq_ms); }
+inline void set_next_timer_interrupt() { sbi::set_timer(csr::time::read() + timer_interrupt_ms * fdt::clk_freq_ms); }
 
-extern "C" void handle_trap(trap_frame *f) {
+} // namespace
+
+extern "C" void handle_trap(trap::frame *f) {
     auto scause = csr::scause::read();
     auto stval = csr::stval::read();
 
@@ -236,12 +243,12 @@ extern "C" void handle_trap(trap_frame *f) {
             // printf("Adjusting sleeping delta list\n");
             sleepq.first_key() -= timer_interrupt_ms;
             if (sleepq.first_key() <= 0)
-                wakeup();
+                proc::wakeup();
         }
         if (--preempt <= 0 and !ready_queue().empty()) {
             // printf("Preempt scheduling\n");
             preempt = quantum;
-            reschedule();
+            proc::reschedule();
         }
     } break;
     case SExternalIntr: {
@@ -283,7 +290,9 @@ extern "C" void handle_trap(trap_frame *f) {
     }
 }
 
-void interrupt_init() {
+namespace trap {
+
+void init() {
     using namespace csr;
 
     // This is super important, without setting stvec, sret won't take us to sepc.
@@ -299,3 +308,5 @@ void interrupt_init() {
     sie::read().set(sie_enc::STIE).set(sie_enc::SEIE).write();
     sstatus::read().set(sstatus_enc::SIE).write();
 }
+
+} // namespace trap

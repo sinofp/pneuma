@@ -1,4 +1,4 @@
 #!/usr/bin/env zsh
 
-clang-format -i **.{h,cc}
+clang-format -i **/*.{h,cc}
 nixfmt flake.nix

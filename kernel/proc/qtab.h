@@ -3,8 +3,10 @@
 #include "lib/optional.h"
 #include "proc/proc.h"
 
-using qkey_t = int32_t; // Use int for minus MINKEY TODO better approach
-using qid_t = pid_t;    // Since the index is pid
+// TODO wrap everytihing in proc namespace?
+
+using qkey_t = int32_t;   // Use int for minus MINKEY TODO better approach
+using qid_t = proc::id_t; // Since the index is pid
 
 // TODO consider removing it because we don't rely on this special value for empty()
 constexpr qid_t EMPTY = -1;
@@ -12,9 +14,9 @@ constexpr qkey_t MAXKEY = 0x7FFFFFFF;
 constexpr qkey_t MINKEY = 0x80000000;
 
 constexpr size_t NQUEUES = 2;                       // # of different queues (ready, sleep, etc.)
-constexpr size_t NQENT = PROCS_MAX + (NQUEUES * 2); // * 2 for head & tail
-constexpr qid_t READY_QUEUE = PROCS_MAX;
-constexpr qid_t SLEEP_QUEUE = PROCS_MAX + 2;
+constexpr size_t NQENT = proc::MAX + (NQUEUES * 2); // * 2 for head & tail
+constexpr qid_t READY_QUEUE = proc::MAX;
+constexpr qid_t SLEEP_QUEUE = proc::MAX + 2;
 
 struct qent {
     qkey_t key;
@@ -26,7 +28,9 @@ struct qent {
 // I might make the methods non-inline because I don't want other source files able to access qtab directly.
 extern qent qtab[];
 
-void queue_init();
+namespace queue {
+void init();
+} // namespace queue
 
 // 'Different' queues that uses qtab
 class queue_view {
@@ -63,17 +67,17 @@ public:
 
     qid_t end() const { return tail_id(); }
 
-    // Queue is empty if first entry points to something >= PROCS_MAX (i.e., tail)
+    // Queue is empty if first entry points to something >= proc::MAX (i.e., tail)
     // TODO change it to first_id() == tail_id()?
-    bool empty() const { return first_id() >= static_cast<qid_t>(PROCS_MAX); }
+    bool empty() const { return first_id() >= static_cast<qid_t>(proc::MAX); }
 
     // Return a reference so we can modify (for sleep queue)
     qkey_t &first_key() const { return qtab[first_id()].key; }
 
     // Insert at the end.
     // This method is only used for FIFO queues, so we ignore their key (priority)
-    inline optional<pid_t> enqueue(pid_t pid) {
-        if (bad_pid(pid)) {
+    inline optional<proc::id_t> enqueue(proc::id_t pid) {
+        if (proc::bad_id(pid)) {
             return nullopt;
         }
 
@@ -106,8 +110,8 @@ public:
         return pid;
     }
 
-    inline optional<pid_t> insert_desc(pid_t pid, qkey_t key) {
-        if (bad_pid(pid))
+    inline optional<proc::id_t> insert_desc(proc::id_t pid, qkey_t key) {
+        if (proc::bad_id(pid))
             return nullopt;
 
         qid_t next;
@@ -129,8 +133,8 @@ public:
         return pid;
     }
 
-    inline optional<pid_t> insert_delta(pid_t pid, qid_t key) {
-        if (bad_pid(pid))
+    inline optional<proc::id_t> insert_delta(proc::id_t pid, qid_t key) {
+        if (proc::bad_id(pid))
             return nullopt;
 
         qid_t next;
@@ -151,8 +155,8 @@ public:
         return pid;
     }
 
-    inline optional<pid_t> remove(pid_t pid) {
-        if (bad_pid(pid))
+    inline optional<proc::id_t> remove(proc::id_t pid) {
+        if (proc::bad_id(pid))
             return nullopt;
 
         auto next = qtab[pid].next;

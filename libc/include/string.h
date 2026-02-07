@@ -9,5 +9,4 @@ void *memset(void *, int, size_t);
 char *strcpy(char *, const char *); // TODO replace by strlcpy
 int strcmp(const char *, const char *);
 size_t strlen(const char *);
-
 }

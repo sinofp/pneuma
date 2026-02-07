@@ -22,8 +22,9 @@ inline void print(queue_view (*queue)()) {
 }
 
 inline void print_procs() {
+    using namespace proc;
     printf("procs content:\n");
-    for (int i = 0; i < PROCS_MAX; ++i)
+    for (int i = 0; i < MAX; ++i)
         printf("  i: %d, pid: 0x%x, pid_addr: %p, state: 0x%x, sp: %p, stack range [%p, %p]\n", i, procs[i].pid,
                &procs[i].pid, static_cast<int>(procs[i].state), reinterpret_cast<void *>(procs[i].sp), procs[i].stack,
                &procs[i].stack[sizeof(procs[i].stack)]);

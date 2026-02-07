@@ -2,43 +2,42 @@
 
 #include "mem/pagetable.h"
 
-void virtio_blk_init();
-void read_write_disk(void *, uint64_t, int);
-// void virtio_blk_intr();
+namespace virtio {
 
-constexpr size_t SECTOR_SIZE = 512;
+// Move to virtio::blk?
+constexpr uint32_t DEVICE_BLK = 2;
+
+constexpr size_t REG_MAGIC = 0x00;
+constexpr size_t REG_VERSION = 0x04;
+constexpr size_t REG_DEVICE_ID = 0x08;
+constexpr size_t REG_QUEUE_SEL = 0x30;
+constexpr size_t REG_QUEUE_NUM_MAX = 0x34;
+constexpr size_t REG_QUEUE_NUM = 0x38;
+constexpr size_t REG_QUEUE_ALIGN = 0x3c;
+constexpr size_t REG_QUEUE_PFN = 0x40;
+constexpr size_t REG_QUEUE_READY = 0x44;
+constexpr size_t REG_QUEUE_NOTIFY = 0x50;
+constexpr size_t REG_INTERRUPT_STATUS = 0x60;
+constexpr size_t REG_INTERRUPT_ACK = 0x64;
+constexpr size_t REG_DEVICE_STATUS = 0x70;
+constexpr size_t REG_DEVICE_CONFIG = 0x100;
+
+constexpr uint32_t STATUS_ACK = 1;
+constexpr uint32_t STATUS_DRIVER = 2;
+constexpr uint32_t STATUS_DRIVER_OK = 4;
+constexpr uint32_t STATUS_FEAT_OK = 8;
+
 constexpr size_t VIRTQ_ENTRY_NUM = 16;
-constexpr uint32_t VIRTIO_DEVICE_BLK = 2;
-
-extern paddr_t virtio_blk_base;
-extern paddr_t blk_vq_paddr; // Allocated in mem::init
-
-constexpr size_t VIRTIO_REG_MAGIC = 0x00;
-constexpr size_t VIRTIO_REG_VERSION = 0x04;
-constexpr size_t VIRTIO_REG_DEVICE_ID = 0x08;
-constexpr size_t VIRTIO_REG_QUEUE_SEL = 0x30;
-constexpr size_t VIRTIO_REG_QUEUE_NUM_MAX = 0x34;
-constexpr size_t VIRTIO_REG_QUEUE_NUM = 0x38;
-constexpr size_t VIRTIO_REG_QUEUE_ALIGN = 0x3c;
-constexpr size_t VIRTIO_REG_QUEUE_PFN = 0x40;
-constexpr size_t VIRTIO_REG_QUEUE_READY = 0x44;
-constexpr size_t VIRTIO_REG_QUEUE_NOTIFY = 0x50;
-constexpr size_t VIRTIO_REG_INTERRUPT_STATUS = 0x60;
-constexpr size_t VIRTIO_REG_INTERRUPT_ACK = 0x64;
-constexpr size_t VIRTIO_REG_DEVICE_STATUS = 0x70;
-constexpr size_t VIRTIO_REG_DEVICE_CONFIG = 0x100;
-
-constexpr uint32_t VIRTIO_STATUS_ACK = 1;
-constexpr uint32_t VIRTIO_STATUS_DRIVER = 2;
-constexpr uint32_t VIRTIO_STATUS_DRIVER_OK = 4;
-constexpr uint32_t VIRTIO_STATUS_FEAT_OK = 8;
 
 constexpr uint16_t VIRTQ_DESC_F_NEXT = 1;
 constexpr uint16_t VIRTQ_DESC_F_WRITE = 2;
 constexpr uint16_t VIRTQ_AVAIL_F_NO_INTERRUPT = 1;
 
-constexpr uint32_t VIRTIO_BLK_T_IN = 0;
-constexpr uint32_t VIRTIO_BLK_T_OUT = 1;
+namespace blk {
+constexpr uint32_t T_IN = 0;
+constexpr uint32_t T_OUT = 1;
+constexpr size_t SECTOR_SIZE = 512;
+} // namespace blk
 
 // Virtqueue Descriptor area entry.
 struct [[gnu::packed]] virtq_desc {
@@ -69,7 +68,7 @@ struct [[gnu::packed]] virtq_used {
 };
 
 // Virtqueue.
-struct [[gnu::packed]] virtio_virtq {
+struct [[gnu::packed]] virtq {
     struct virtq_desc descs[VIRTQ_ENTRY_NUM];
     struct virtq_avail avail;
     struct virtq_used used __attribute__((aligned(PAGE_SIZE)));
@@ -78,8 +77,10 @@ struct [[gnu::packed]] virtio_virtq {
     uint16_t last_used_index;
 };
 
+namespace blk {
+
 // Virtio-blk request.
-struct [[gnu::packed]] virtio_blk_req {
+struct [[gnu::packed]] req_t {
     // First descriptor: read-only from the device
     uint32_t type;
     uint32_t reserved;
@@ -89,3 +90,26 @@ struct [[gnu::packed]] virtio_blk_req {
     // Third descriptor: writable by the device (VIRTQ_DESC_F_WRITE)
     uint8_t status;
 };
+
+} // namespace blk
+
+// Shared virtqueue operations (for blk, gpu, etc.)
+virtq *virtq_init(uint32_t index);
+void virtq_kick(virtq *vq, uint16_t desc_index);
+bool virtq_is_busy(virtq *vq);
+
+namespace blk {
+void init();
+void read_write(void *buf, uint64_t sector, int is_write);
+
+extern virtq *request_vq;
+extern paddr_t vq_paddr;
+extern paddr_t req_paddr;
+extern uint64_t capacity;
+extern bool use_shifted_pfn;
+extern paddr_t base;
+} // namespace blk
+
+// Future: namespace gpu { ... }
+
+} // namespace virtio

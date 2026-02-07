@@ -2,11 +2,11 @@
 
 #include "lib/types.h"
 
-void interrupt_init();
+namespace trap {
+void init();
+void kernel_entry();
 
-using sxlen_t = unsigned long;
-
-struct [[gnu::packed]] trap_frame {
+struct [[gnu::packed]] frame {
     sxlen_t sepc;
     sxlen_t sstatus;
     xlen_t ra;
@@ -41,3 +41,7 @@ struct [[gnu::packed]] trap_frame {
     xlen_t s11;
     xlen_t sp;
 };
+
+} // namespace trap
+
+extern "C" void handle_trap(trap::frame *);

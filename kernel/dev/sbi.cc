@@ -1,5 +1,7 @@
 #include "dev/sbi.h"
 
+namespace {
+
 struct sbiret {
     long error;
 
@@ -36,6 +38,8 @@ sbiret sbi_call(xlen_t arg0, xlen_t arg1, xlen_t arg2, xlen_t arg3, xlen_t arg4,
     return { static_cast<long>(a0), { a1 } };
 }
 
+} // namespace
+
 // DBCN: Console Write Byte (FID #2), struct sbiret sbi_debug_console_write_byte(uint8_t byte)
 int putchar(int ch) {
     const auto ret = sbi_call(static_cast<uint8_t>(ch), 0, 0, 0, 0, 0, 2, EID::DBCN);
@@ -59,8 +63,10 @@ int getchar() {
         return EOF;
 }
 
+namespace sbi {
+
 // Set Timer (FID #0) struct sbiret sbi_set_timer(uint64_t stime_value)
-void sbi_set_timer(uint64_t stime_value) {
+void set_timer(uint64_t stime_value) {
     // 'This function always returns SBI_SUCCESS in sbiret.error.'
     if (64 == __riscv_xlen) {
         sbi_call(stime_value, 0, 0, 0, 0, 0, 0, EID::TIME);
@@ -76,3 +82,5 @@ void sbi_set_timer(uint64_t stime_value) {
 void shutdown() {
     sbi_call(0, 0, 0, 0, 0, 0, 0, EID::SRST);
 }
+
+} // namespace sbi

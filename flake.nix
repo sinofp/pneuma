@@ -151,15 +151,23 @@
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
           # Helper to find files recursively
-          findFiles = dir: suffix:
+          findFiles =
+            dir: suffix:
             let
               contents = builtins.readDir dir;
-              processEntry = name: type:
-                let path = dir + "/${name}"; in
-                if type == "directory" then findFiles path suffix
-                else if lib.hasSuffix suffix name then [ path ]
-                else [];
-            in builtins.concatLists (lib.mapAttrsToList processEntry contents);
+              processEntry =
+                name: type:
+                let
+                  path = dir + "/${name}";
+                in
+                if type == "directory" then
+                  findFiles path suffix
+                else if lib.hasSuffix suffix name then
+                  [ path ]
+                else
+                  [ ];
+            in
+            builtins.concatLists (lib.mapAttrsToList processEntry contents);
 
           # Glob all kernel sources and headers
           kernelSources = findFiles ./kernel ".cc";
@@ -192,7 +200,8 @@
           basename = path: builtins.baseNameOf (toString path);
 
           # Get relative path within kernel directory
-          kernelRelPath = path:
+          kernelRelPath =
+            path:
             let
               pathStr = toString path;
               kernelDir = toString ./kernel + "/";
@@ -243,24 +252,26 @@
                 cp ${./user/user.ld} user/user.ld
 
                 # Build user programs
-                ${lib.concatMapStringsSep "\n" (prog:
+                ${lib.concatMapStringsSep "\n" (
+                  prog:
                   let
                     name = lib.removeSuffix ".cc" (basename prog);
-                  in ''
-                # Build ${name}.elf
-                ${clang} ${userCcflags} \
-                  --ld-path=${lld} \
-                  -Wl,-Tuser/user.ld \
-                  -Wl,-Map=$out/${name}.map \
-                  -o $out/${name}.elf \
-                  ${lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
+                  in
+                  ''
+                    # Build ${name}.elf
+                    ${clang} ${userCcflags} \
+                      --ld-path=${lld} \
+                      -Wl,-Tuser/user.ld \
+                      -Wl,-Map=$out/${name}.map \
+                      -o $out/${name}.elf \
+                      ${lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
 
-                # Convert to binary and ELF object
-                ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
-                pushd $out
-                ${objcopy} -I binary -O ${cfg.elfFormat} ${name}.bin ${name}.bin.o
-                popd
-                ''
+                    # Convert to binary and ELF object
+                    ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
+                    pushd $out
+                    ${objcopy} -I binary -O ${cfg.elfFormat} ${name}.bin ${name}.bin.o
+                    popd
+                  ''
                 ) userPrograms}
 
                 # Build kernel.elf with embedded user programs
@@ -270,7 +281,9 @@
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
                   ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
-                  ${lib.concatStringsSep " " (map (prog: "$out/${lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms)}
+                  ${lib.concatStringsSep " " (
+                    map (prog: "$out/${lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms
+                  )}
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image

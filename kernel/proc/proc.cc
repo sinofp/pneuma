@@ -1,17 +1,20 @@
 #include "proc/proc.h"
-#include "trap/csr.h"
+#include "dev/virtio.h"
 #include "lib/debug.h"
 #include "mem/mem.h"
-#include "trap/plic.h"
 #include "proc/qtab.h"
-#include "dev/virtio.h"
+#include "trap/csr.h"
+#include "trap/plic.h"
 
-process procs[PROCS_MAX]; // All process control structures.
+namespace proc {
+process procs[MAX]; // All process control structures.
+process *current;   // Currently running process
+process *idle;      // Idle process
+} // namespace proc
 
-process *current_proc; // Currently running process
-process *idle_proc;    // Idle process
+using enum proc::state_t;
 
-using enum ProcState;
+namespace {
 
 // We only execute this function at the beginning of a user process.
 // So we don't care the 'restored' registers, because they're all placeholders allocated in create_process,
@@ -25,17 +28,36 @@ void user_entry() {
                  "csrw sstatus, %[sstatus]  \n"
                  "sret                      \n"
                  :
-                 : [sepc] "r"(USER_BASE), [sstatus] "r"(csr::sstatus::read()
-                                                            .unset(SPP) // Not needed, but I like explicit
-                                                            .set(SUM)
-                                                            .raw()));
+                 : [sepc] "r"(proc::USER_BASE), [sstatus] "r"(csr::sstatus::read()
+                                                                  .unset(SPP) // Not needed, but I like explicit
+                                                                  .set(SUM)
+                                                                  .raw()));
 }
 
-process *create_process(span<const uint8_t> image) {
+struct [[gnu::packed]] reg_ctx {
+    xlen_t ra;
+    xlen_t s0;
+    xlen_t s1;
+    xlen_t s2;
+    xlen_t s3;
+    xlen_t s4;
+    xlen_t s5;
+    xlen_t s6;
+    xlen_t s7;
+    xlen_t s8;
+    xlen_t s9;
+    xlen_t s10;
+    xlen_t s11;
+};
+
+} // namespace
+
+namespace proc {
+process *create(span<const uint8_t> image) {
     // Find an unused process control structure.
     process *proc = nullptr;
     size_t i;
-    for (i = 0; i < PROCS_MAX; ++i)
+    for (i = 0; i < MAX; ++i)
         if (procs[i].state == UNUSED) {
             proc = &procs[i];
             break;
@@ -61,27 +83,27 @@ process *create_process(span<const uint8_t> image) {
     // Identical mapping for kernel pages, prepared for user's syscalls.
     // Map everything from __kernel_base to __free_ram_end.
     // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
-    // dynamically allocated areas managed by alloc_frame
-    pt_t page_table{ alloc_frame() };
+    // dynamically allocated areas managed by mem::alloc_frame
+    pt_t page_table{ mem::alloc_frame() };
     for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < static_cast<vaddr_t>(free_ram_end);
          kaddr += PAGE_SIZE)
-        map_page(page_table, kaddr, kaddr, R | W | X);
+        mem::map_page(page_table, kaddr, kaddr, R | W | X);
 
     // Map virtio-block MMIO
-    map_page(page_table, virtio_blk_base, virtio_blk_base, R | W);
+    mem::map_page(page_table, virtio::blk::base, virtio::blk::base, R | W);
 
     // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
     for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
-        map_page(page_table, plic_addr, plic_addr, R | W);
+        mem::map_page(page_table, plic_addr, plic_addr, R | W);
 
     // Map user pages.
     for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
-        paddr_t page = alloc_frame();
+        paddr_t page = mem::alloc_frame();
 
         // Fill and map the page.
         auto chunk = image.subspan(offset, min(PAGE_SIZE, image.size() - offset));
         memcpy((void *) page, chunk.data(), chunk.size());
-        map_page(page_table, USER_BASE + offset, page, U | R | W | X);
+        mem::map_page(page_table, USER_BASE + offset, page, U | R | W | X);
     }
 
     // Initialize fields.
@@ -90,17 +112,20 @@ process *create_process(span<const uint8_t> image) {
     // MLFQ rule 3: Put process in the highest queue when created
     // I give it to the second highest because I'll give interactive program (shell) the highest.
     // Although that means only the shell takes the CPU forever.
-    proc->prio = ProcPrio::IV; // default prio
+    proc->prio = proc::prio_t::IV; // default prio
     proc->sp = sp;
     proc->state = SUSPENDED;
     proc->page_table = page_table;
     return proc;
 }
 
-void destroy_process(process *proc) {
-    destroy_page_table(proc->page_table);
+void destroy(process *proc) {
+    mem::destroy_page_table(proc->page_table);
     proc->page_table = {};
 }
+} // namespace proc
+
+namespace {
 
 // No matter what's the type of process::sp, we want the pointer to the prev_sp, and the value of next_sp.
 // I use template here because I wasn't sure what's the best type for process::sp: xlen_t, xlen_t *, vaddr_t, or vaddr_t
@@ -159,6 +184,10 @@ void switch_context(T *prev_sp, T next_sp) {
           [s9] "i"(offsetof(reg_ctx, s9)), [s10] "i"(offsetof(reg_ctx, s10)), [s11] "i"(offsetof(reg_ctx, s11)));
 }
 
+} // namespace
+
+namespace proc {
+
 // TODO bad_pid
 
 void ready(process *proc, bool instant) {
@@ -169,7 +198,7 @@ void ready(process *proc, bool instant) {
         reschedule();
 }
 
-void chprio(process *proc, ProcPrio prio, bool instant) {
+void chprio(process *proc, proc::prio_t prio, bool instant) {
     proc->prio = prio;
     if (READY == proc->state) {
         csr::intr_guard g;
@@ -206,14 +235,14 @@ void sleep_ms(int32_t delay) {
     if (delay < 0)
         return;
     if (!delay) {
-        ready(current_proc);
+        ready(current);
         return;
     }
     if (MAXKEY <= delay)
         PANIC("Sleeping time exceeds MAXKEY.");
     csr::intr_guard g;
-    sleep_queue().insert_delta(current_proc->pid, delay);
-    current_proc->state = ProcState::SLEEPING;
+    sleep_queue().insert_delta(current->pid, delay);
+    current->state = proc::state_t::SLEEPING;
     reschedule();
 }
 
@@ -231,8 +260,8 @@ void wakeup() {
 void reschedule() {
     csr::intr_guard g;
 
-    // printf("reschedule: current_proc->pid: %d, prio: %d, running: %d\n", current_proc->pid,
-    //        static_cast<int>(current_proc->prio), RUNNING == current_proc->state);
+    // printf("reschedule: current->pid: %d, prio: %d, running: %d\n", current->pid,
+    //        static_cast<int>(current->prio), RUNNING == current->state);
     // print_procs();
     // printf("readyq:\n");
     // print(ready_queue);
@@ -243,12 +272,12 @@ void reschedule() {
 
     // The caller is supposed to change the state if needed
     // If it's still running, we only switch if a higher priority process is ready
-    if (RUNNING == current_proc->state) { // MLFQ rule 1: Keep executing if current priority is the highest
-        if (readyq.first_key() < static_cast<qkey_t>(current_proc->prio))
+    if (RUNNING == current->state) { // MLFQ rule 1: Keep executing if current priority is the highest
+        if (readyq.first_key() < static_cast<qkey_t>(current->prio))
             return;
 
-        current_proc->state = READY;
-        readyq.insert_desc(current_proc->pid, static_cast<qkey_t>(current_proc->prio));
+        current->state = READY;
+        readyq.insert_desc(current->pid, static_cast<qkey_t>(current->prio));
         // printf("readyq after insert_desc:\n");
         // print(ready_queue);
     }
@@ -270,13 +299,15 @@ void reschedule() {
                  : [sscratch] "r"(kernel_stack));
 
     // Context switch
-    process *prev = current_proc;
-    current_proc = next;
-    current_proc->state = RUNNING;
-    // printf("reschedule: Switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
+    process *prev = current;
+    current = next;
+    current->state = RUNNING;
+    // printf("reschedule: Switching from (pid=%d, sp=%proc) to (pid=%d, sp=%proc)\n", prev->pid,
     //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
     switch_context(&prev->sp, next->sp);
-    // printf("reschedule: Returned from switching from (pid=%d, sp=%p) to (pid=%d, sp=%p)\n", prev->pid,
+    // printf("reschedule: Returned from switching from (pid=%d, sp=%proc) to (pid=%d, sp=%proc)\n", prev->pid,
     //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
     // TODO print SIE and SPIE
 }
+
+} // namespace proc

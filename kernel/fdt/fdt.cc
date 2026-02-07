@@ -1,4 +1,5 @@
 #include "fdt/fdt.h"
+#include "dev/virtio.h"
 #include "lib/common.h"
 #include "lib/span.h"
 #include "lib/symbols.h"
@@ -104,7 +105,7 @@ constexpr size_t max_depth = 16;
 
 using fdt::uninitialised;
 
-paddr_t virtio_blk_base = uninitialised; // 0x10001000;
+// virtio::blk::base is now defined in dev/virtio-blk.cc
 
 namespace fdt {
 virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
@@ -117,13 +118,13 @@ paddr_t start_addr = uninitialised;      // 0x0c000000;
 paddr_t end_addr = uninitialised;        // 0x00600000;
 } // namespace plic
 
-uint32_t clk_freq_sec = uninitialised;
-uint32_t clk_freq_ms = uninitialised;
-uint32_t clk_freq_us = uninitialised;
-
 paddr_t free_ram_end;
 
 namespace fdt {
+
+uint32_t clk_freq_sec = uninitialised;
+uint32_t clk_freq_ms = uninitialised;
+uint32_t clk_freq_us = uninitialised;
 
 // https://devicetree-specification.readthedocs.io/en/stable/flattened-format.html#header
 struct header {
@@ -196,7 +197,7 @@ void init(const header *fdt_ptr) {
                 if (!virtio_found or ctx.reg_addr < virtio_first) {
                     virtio_found = true;
                     virtio_first = ctx.reg_addr;
-                    virtio_blk_base = static_cast<paddr_t>(ctx.reg_addr);
+                    virtio::blk::base = static_cast<paddr_t>(ctx.reg_addr);
                     plic::VIRTIO_BLK_IRQ = ctx.irq;
                 }
             }
@@ -246,9 +247,9 @@ void init(const header *fdt_ptr) {
 
             if (ctx.is_cpus and !strcmp(prop_name, "timebase-frequency") and sizeof(be<uint32_t>) <= len) {
                 // DT spec defines timebase-frequency as a single 32-bit cell.
-                clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
-                clk_freq_ms = clk_freq_sec / 1000u;
-                clk_freq_us = clk_freq_ms / 1000u;
+                fdt::clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+                fdt::clk_freq_ms = fdt::clk_freq_sec / 1000u;
+                fdt::clk_freq_us = fdt::clk_freq_ms / 1000u;
                 continue;
             }
 

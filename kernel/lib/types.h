@@ -11,6 +11,8 @@ using vaddr_t = uintptr_t;
 // I choose unsigned long because of its usage in OpenSBI interfaces
 using xlen_t = unsigned long;
 
+using sxlen_t = unsigned long;
+
 // Sv32 has 34-bit physical address, while Sv39 has 56-bit physical address.
 // Assume we don't need more than 4GB space for RV32 with Sv32,
 // otherwise all physical address arithmetic will become 64-bit on RV32.

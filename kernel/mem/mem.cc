@@ -62,11 +62,12 @@ frame_stack free_stack;
 } // namespace
 
 namespace mem {
+
 void init() {
     // The virtq requiers more than one contiguous physical pages,
     // while our alloc_frame + map_page is designed to allocate contiguous virtual pages.
     // To forbid the usage of alloc_pages after we initilise the free stack, we allocate the virtq here.
-    blk_vq_paddr = alloc_pages(align_up(sizeof(virtio_virtq), PAGE_SIZE) / PAGE_SIZE);
+    virtio::blk::vq_paddr = alloc_pages(align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE);
 
     auto base = bump_paddr;
     auto total_bytes = free_ram_end - base;
@@ -88,7 +89,6 @@ void init() {
     // Disable alloc_pages TODO remove?
     bump_paddr = free_ram_end;
 }
-} // namespace mem
 
 paddr_t alloc_frame() {
     if (!free_stack.capacity()) [[unlikely]]
@@ -167,3 +167,5 @@ void destroy_page_table(pt_t &root_table) {
     free_level(root_table);
     free_frame(root_table);
 }
+
+} // namespace mem

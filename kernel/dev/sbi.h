@@ -2,7 +2,8 @@
 
 #include "lib/common.h"
 
-void sbi_set_timer(uint64_t stime_value);
-
+namespace sbi {
+void set_timer(uint64_t stime_value);
 [[noreturn]]
 void shutdown();
+} // namespace sbi

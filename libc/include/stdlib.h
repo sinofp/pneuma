@@ -6,5 +6,4 @@ extern "C" {
 
 [[noreturn]]
 void exit(int);
-
 }

@@ -2,13 +2,15 @@
 
 qent qtab[NQENT];
 
-void queue_init() {
+namespace queue {
+
+void init() {
     // TODO remove?
-    for (size_t i = 0; i < PROCS_MAX; ++i)
+    for (size_t i = 0; i < proc::MAX; ++i)
         qtab[i] = { 0, EMPTY, EMPTY };
 
     // Initialize each queue's head/tail pair
-    for (qid_t head = PROCS_MAX; head < NQENT; head += 2) {
+    for (qid_t head = proc::MAX; head < NQENT; head += 2) {
         qid_t tail = head + 1;
 
         // The MINKEY at tail is used to ensure the descending priority queue can find a place to insert.
@@ -16,3 +18,5 @@ void queue_init() {
         qtab[tail] = { MINKEY, EMPTY, head };
     }
 }
+
+} // namespace queue

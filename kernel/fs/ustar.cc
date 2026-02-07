@@ -1,6 +1,8 @@
 #include "fs/file.h"
 #include "lib/common.h"
 
+namespace {
+
 uint8_t disk[DISK_MAX_SIZE];
 
 // TODO span
@@ -15,9 +17,15 @@ int oct2int(char *oct, int len) {
     return dec;
 }
 
-void fs_init() {
+} // namespace
+
+namespace fs::ustar {
+
+void init() {
+    using namespace virtio::blk;
+
     for (uint64_t sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
-        read_write_disk(&disk[sector * SECTOR_SIZE], sector, false);
+        read_write(&disk[sector * SECTOR_SIZE], sector, false);
 
     auto offset = 0uz;
     for (auto i = 0uz; i < FILES_MAX; ++i) {
@@ -29,7 +37,7 @@ void fs_init() {
             PANIC("invalid tar header: magic=\"%s\"", header->magic);
 
         auto filesz = oct2int(header->size, sizeof(header->size));
-        auto *f = &files[i];
+        auto *f = &fs::files[i];
         f->in_use = true;
         strcpy(f->name, header->name);
         memcpy(f->data, header->data, filesz);
@@ -40,12 +48,14 @@ void fs_init() {
     }
 }
 
-void fs_flush() {
+void flush() {
+    using namespace virtio::blk;
+
     // Copy all file contents into `disk` buffer.
     memset(disk, 0, sizeof(disk));
     auto offset = 0uz;
     for (auto file_i = 0uz; file_i < FILES_MAX; ++file_i) {
-        file *f = &files[file_i];
+        file *f = &fs::files[file_i];
         if (!f->in_use)
             continue;
 
@@ -82,7 +92,9 @@ void fs_flush() {
 
     // Write `disk` buffer into the virtio-blk.
     for (uint64_t sector = 0; sector < sizeof(disk) / SECTOR_SIZE; ++sector)
-        read_write_disk(&disk[sector * SECTOR_SIZE], sector, true);
+        read_write(&disk[sector * SECTOR_SIZE], sector, true);
 
     printf("wrote %d bytes to disk\n", sizeof(disk));
 }
+
+} // namespace fs::ustar

@@ -1,10 +1,7 @@
 #pragma once
 
-#include "lib/common.h"
 #include "dev/virtio.h"
-
-void fs_init();
-void fs_flush();
+#include "lib/common.h"
 
 struct [[gnu::packed]] tar_header {
     char name[100];
@@ -36,7 +33,15 @@ struct file {
 };
 
 constexpr size_t FILES_MAX = 3;
-constexpr size_t DISK_MAX_SIZE = align_up(sizeof(file) * FILES_MAX, SECTOR_SIZE);
+constexpr size_t DISK_MAX_SIZE = align_up(sizeof(file) * FILES_MAX, virtio::blk::SECTOR_SIZE);
 constexpr char USTAR_MAGIC[] = "ustar";
 
+namespace fs {
 extern file files[FILES_MAX];
+
+namespace ustar {
+void init();
+void flush();
+} // namespace ustar
+
+} // namespace fs
