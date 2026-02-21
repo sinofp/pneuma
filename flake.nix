@@ -174,27 +174,9 @@
           kernelHeaders = findFiles ./kernel ".h";
 
           # Source file lists for libc and user programs
-          libcSources = [
-            ./libc/src/crt0.cc
-            ./libc/src/syscall.cc
-            ./libc/src/stdio.cc
-            ./libc/src/stdlib.cc
-            ./libc/src/string.cc
-            ./libc/src/misc.cc
-          ];
-          userPrograms = [
-            ./user/shell.cc
-            ./user/a.cc
-            ./user/b.cc
-          ];
-          libcHeaders = [
-            ./libc/include/sys/syscall.h
-            ./libc/include/sys/misc.h
-            ./libc/include/stdio.h
-            ./libc/include/stdlib.h
-            ./libc/include/string.h
-            ./libc/include/stdarg.h
-          ];
+          libcSources = findFiles ./libc/src ".cc";
+          libcHeaders = findFiles ./libc/include ".h";
+          userPrograms = (findFiles ./user ".cc") ++ (findFiles ./user ".c");
 
           # Helper to get just the filename from a path
           basename = path: builtins.baseNameOf (toString path);
@@ -208,6 +190,15 @@
             in
             lib.removePrefix kernelDir pathStr;
 
+          # Get relative path within libc/include directory
+          libcIncludeRelPath =
+            path:
+            let
+              pathStr = toString path;
+              libcIncludeDir = toString ./libc/include + "/";
+            in
+            lib.removePrefix libcIncludeDir pathStr;
+
           # Helper function to build kernel with embedded shell for a specific architecture
           mkKernel =
             arch:
@@ -216,7 +207,8 @@
               # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
               pie = if arch == "riscv64" then "-fPIE" else "";
               ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -I kernel";
-              userCcflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -nostdlibinc -isystem libc/include";
+              userCxxflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -nostdlibinc -isystem libc/include";
+              userCflags = "-std=c2x -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
@@ -238,12 +230,13 @@
                 ${lib.concatMapStringsSep "\n" (
                   path:
                   let
-                    name = basename path;
+                    relPath = libcIncludeRelPath path;
+                    dir = builtins.dirOf relPath;
                   in
-                  if name == "syscall.h" || name == "misc.h" then
-                    "cp ${path} libc/include/sys/${name}"
-                  else
-                    "cp ${path} libc/include/${name}"
+                  ''
+                    mkdir -p libc/include/${dir}
+                    cp ${path} libc/include/${relPath}
+                  ''
                 ) libcHeaders}
 
                 # Copy user directory
@@ -251,20 +244,37 @@
                 ${lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
                 cp ${./user/user.ld} user/user.ld
 
+                # Compile libc sources (all C++)
+                ${lib.concatMapStringsSep "\n" (
+                  src:
+                  let
+                    name = lib.removeSuffix ".cc" (basename src);
+                  in
+                  ''
+                    ${clang} ${userCxxflags} -c -o libc-${name}.o libc/src/${basename src}
+                  ''
+                ) libcSources}
+
                 # Build user programs
                 ${lib.concatMapStringsSep "\n" (
                   prog:
                   let
-                    name = lib.removeSuffix ".cc" (basename prog);
+                    progFile = basename prog;
+                    name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
+                    isC = lib.hasSuffix ".c" progFile;
+                    progFlags = if isC then userCflags else userCxxflags;
                   in
                   ''
                     # Build ${name}.elf
-                    ${clang} ${userCcflags} \
+                    ${clang} ${progFlags} -c -o user-${name}.o user/${progFile}
+                    ${clang} ${userCxxflags} \
                       --ld-path=${lld} \
                       -Wl,-Tuser/user.ld \
                       -Wl,-Map=$out/${name}.map \
                       -o $out/${name}.elf \
-                      ${lib.concatStringsSep " " (map (p: "libc/src/${basename p}") libcSources)} user/${basename prog}
+                      ${
+                        lib.concatStringsSep " " (map (p: "libc-${lib.removeSuffix ".cc" (basename p)}.o") libcSources)
+                      } user-${name}.o
 
                     # Convert to binary and ELF object
                     ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
@@ -282,7 +292,9 @@
                   -o $out/kernel.elf \
                   ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
                   ${lib.concatStringsSep " " (
-                    map (prog: "$out/${lib.removeSuffix ".cc" (basename prog)}.bin.o") userPrograms
+                    map (
+                      prog: "$out/${lib.removeSuffix ".c" (lib.removeSuffix ".cc" (basename prog))}.bin.o"
+                    ) userPrograms
                   )}
 
                 # Generate Image file for U-Boot booti
@@ -296,7 +308,8 @@
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
               ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -I kernel";
-              userCcflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
+              userCxxflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
+              userCflags = "-std=c2x -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
 
               # Generate entries for kernel sources
               kernelEntries = map (src: {
@@ -308,16 +321,22 @@
               # Generate entries for libc sources (need -isystem libc/include)
               libcEntries = map (src: {
                 directory = ".";
-                command = "${clang} ${userCcflags} -c libc/src/${basename src}";
+                command = "${clang} ${userCxxflags} -c libc/src/${basename src}";
                 file = "libc/src/${basename src}";
               }) libcSources;
 
               # Generate entries for user programs (need -isystem libc/include)
-              userEntries = map (src: {
-                directory = ".";
-                command = "${clang} ${userCcflags} -c user/${basename src}";
-                file = "user/${basename src}";
-              }) userPrograms;
+              userEntries = map (src:
+                let
+                  file = basename src;
+                  isC = lib.hasSuffix ".c" file;
+                  flags = if isC then userCflags else userCxxflags;
+                in {
+                  directory = ".";
+                  command = "${clang} ${flags} -c user/${file}";
+                  file = "user/${file}";
+                }
+              ) userPrograms;
 
               entries = kernelEntries ++ libcEntries ++ userEntries;
               jsonContent = builtins.toJSON entries;

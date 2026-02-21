@@ -13,4 +13,5 @@ extern uint8_t __kernel_base[], __free_ram[];
 extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];
 extern uint8_t _binary_a_bin_start[], _binary_a_bin_size[];
 extern uint8_t _binary_b_bin_start[], _binary_b_bin_size[];
+extern uint8_t _binary_libc_test_bin_start[], _binary_libc_test_bin_size[];
 }

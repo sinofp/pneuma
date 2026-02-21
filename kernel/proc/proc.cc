@@ -96,7 +96,7 @@ process *create(span<const uint8_t> image) {
     for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
         mem::map_page(page_table, plic_addr, plic_addr, R | W);
 
-    // Map user pages.
+    // Map user image pages.
     for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
         paddr_t page = mem::alloc_frame();
 
@@ -105,6 +105,11 @@ process *create(span<const uint8_t> image) {
         memcpy((void *) page, chunk.data(), chunk.size());
         mem::map_page(page_table, USER_BASE + offset, page, U | R | W | X);
     }
+
+    // Map user heap pages (hard coded 8MB for now)
+    vaddr_t heap_base = align_up(USER_BASE + image.size(), PAGE_SIZE);
+    for (auto offset = 0uz; offset < 8 * 1024 * 1024; offset += PAGE_SIZE)
+        mem::map_page(page_table, heap_base + offset, mem::alloc_frame(), U | R | W | X);
 
     // Initialize fields.
     // Can't construct and swap because the uint8_t stack[];

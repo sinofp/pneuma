@@ -29,4 +29,7 @@ SECTIONS {
 
        ASSERT(. < 0x1800000, "too large executable");
     }
+
+    . = ALIGN(4096);
+    __heap_start = .;
 }

@@ -41,6 +41,10 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
     // Create user processes
+    auto *libc_test =
+        proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) });
+    printf("Process created: libc-test (%d)\n", libc_test->pid);
+
     auto *proc_a = proc::create({ _binary_a_bin_start, reinterpret_cast<size_t>(_binary_a_bin_size) });
     printf("Process created: a (%d)\n", proc_a->pid);
 
@@ -49,6 +53,8 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
     auto *shell = proc::create({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
+
+    proc::resume(libc_test);
 
     proc::resume(proc_b, false);
     proc::resume(proc_a, false);

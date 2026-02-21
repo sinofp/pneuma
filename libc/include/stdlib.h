@@ -1,9 +1,34 @@
 #pragma once
 
-template <typename T> inline T min(T a, T b) { return a < b ? a : b; }
+#include <stddef.h> // size_t
 
+#ifdef __cplusplus
 extern "C" {
+#endif
+
+int abs(int);
+
+double atof(const char *);
+
+int atoi(const char *);
+
+void *calloc(size_t, size_t);
+
+void free(void *);
+
+void *malloc(size_t);
+
+void *realloc(void *, size_t);
+
+char *getenv(const char *);
+
+int remove(const char *);
+
+int rename(const char *, const char *);
 
 [[noreturn]]
 void exit(int);
+
+#ifdef __cplusplus
 }
+#endif
