@@ -1,55 +1,80 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/misc.h>
+
+namespace {
+
+// Read a line from console into buf (max len chars), returns length
+int readline(char *buf, int len) {
+    int i = 0;
+    for (;;) {
+        char ch = getchar();
+        if ('\b' == ch or 127 == ch /* DEL */) {
+            if (i > 0) {
+                --i;
+                printf("\b \b"); // Move back, overwrite with space, move back again
+            }
+        } else if ('\r' == ch) {
+            printf("\n");
+            buf[i] = '\0';
+            return i;
+        } else if (i < len - 1) {
+            putchar(ch);
+            buf[i++] = ch;
+        }
+    }
+}
+
+} // namespace
 
 extern "C" void main(void) {
     for (;;) {
-    prompt:
         printf("> ");
         char cmdline[128];
-        for (int i = 0;; i++) {
-            char ch = getchar();
-            putchar(ch);
-            if (i == sizeof(cmdline) - 1) {
-                printf("command line too long\n");
-                goto prompt;
-            } else if (ch == '\r') {
-                printf("\n");
-                cmdline[i] = '\0';
-                break;
-            } else {
-                cmdline[i] = ch;
-            }
-        }
+        readline(cmdline, sizeof(cmdline));
 
         if (!strcmp(cmdline, "hello"))
             printf("Hello world from shell!\n");
-        else if (!strcmp(cmdline, "readfile")) {
-            // TODO readint, maybe scanf?
-            printf("file descriptor> ");
-            auto ch = getchar();
-            putchar(ch);
-            getchar(); // \n
-            putchar('\n');
-            char file[128];
-            readfile(ch - '0', file, sizeof(file));
-            printf("%s\n", file);
-        } else if (!strcmp(cmdline, "writefile")) {
-            // TODO readint, maybe scanf?
-            printf("file descriptor> ");
-            auto ch = getchar();
-            putchar(ch);
-            getchar(); // \n
-            putchar('\n');
-            char data[] = "爱宝宝\n";
-            writefile(ch - '0', data, sizeof(data));
+        else if (!strcmp(cmdline, "cat")) {
+            printf("filename> ");
+            char filename[64];
+            readline(filename, sizeof(filename));
+
+            FILE *f = fopen(filename, "r");
+            if (nullptr == f) {
+                printf("failed to open %s\n", filename);
+                continue;
+            }
+
+            char buf[256];
+            size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+            buf[n] = '\0';
+            fclose(f);
+            printf("%s\n", buf);
+        } else if (!strcmp(cmdline, "write")) {
+            printf("filename> ");
+            char filename[64];
+            readline(filename, sizeof(filename));
+
+            printf("data> ");
+            char data[128];
+            int len = readline(data, sizeof(data));
+
+            FILE *f = fopen(filename, "w");
+            if (nullptr == f) {
+                printf("failed to open %s\n", filename);
+                continue;
+            }
+
+            fwrite(data, 1, len, f);
+            fclose(f);
+            printf("wrote %d bytes to %s\n", len, filename);
         } else if (!strcmp(cmdline, "fault")) {
             auto p = reinterpret_cast<int *>(1234);
             *p = 5678;
-        } else if (strcmp(cmdline, "exit") == 0 || strcmp(cmdline, "q") == 0)
+        } else if (0 == strcmp(cmdline, "exit") or 0 == strcmp(cmdline, "q"))
             exit(0);
-        else
+        else if (cmdline[0] != '\0')
             printf("unknown command: %s\n", cmdline);
     }
 }

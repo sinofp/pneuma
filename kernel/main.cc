@@ -1,7 +1,6 @@
 #include "dev/sbi.h"
 #include "dev/virtio.h"
 #include "fdt/fdt.h"
-#include "fs/file.h"
 #include "lib/symbols.h"
 #include "mem/mem.h"
 #include "proc/proc.h"
@@ -36,7 +35,6 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     // Therefore it must be placed after idle_proc = create_process, otherwise we'll have
     // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
     virtio::blk::init();
-    fs::ustar::init();
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
@@ -56,8 +54,8 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
     proc::resume(libc_test);
 
-    proc::resume(proc_b, false);
-    proc::resume(proc_a, false);
+    // proc::resume(proc_b, false);
+    // proc::resume(proc_a, false);
     proc::resume(shell, false);
     proc::reschedule();
 

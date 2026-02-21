@@ -41,5 +41,69 @@ int main(void) {
     ASSERT(strcmp(p4, "Hello from libc-test!") == 0, "p4 string mismatch");
     free(p4);
 
+    printf("\n=== Testing stdio FILE* functions ===\n");
+
+    // Test fopen for reading
+    FILE *f = fopen("HELLO.TXT", "r");
+    ASSERT(f, "fopen(HELLO.TXT, r) failed");
+
+    // Test ftell at start
+    long pos = ftell(f);
+    ASSERT(0 == pos, "ftell at start should be 0");
+
+    // Test fread
+    char buf[64];
+    memset(buf, 0, sizeof(buf));
+    size_t n = fread(buf, 1, 27, f);
+    printf("fread returned %d bytes: '%s'\n", (int)n, buf);
+    ASSERT(n == 27, "fread should return 27 bytes");
+
+    // Test ftell after read
+    pos = ftell(f);
+    ASSERT(27 == pos, "ftell after read should be 27");
+
+    // Test fseek to beginning
+    int ret = fseek(f, 0, SEEK_SET);
+    ASSERT(0 == ret, "fseek to start failed");
+    pos = ftell(f);
+    ASSERT(0 == pos, "ftell after fseek(0, SEEK_SET) should be 0");
+
+    // Test fseek relative
+    ret = fseek(f, 5, SEEK_CUR);
+    ASSERT(0 == ret, "fseek(5, SEEK_CUR) failed");
+    pos = ftell(f);
+    ASSERT(5 == pos, "ftell after fseek(5, SEEK_CUR) should be 5");
+
+    // Test fclose
+    ret = fclose(f);
+    ASSERT(0 == ret, "fclose failed");
+
+    // Test fopen for writing
+    f = fopen("TEST.TXT", "w");
+    ASSERT(f, "fopen(TEST.TXT, w) failed");
+
+    // Test fwrite
+    const char *msg = "Written by libc-test!";
+    n = fwrite(msg, 1, strlen(msg), f);
+    printf("fwrite returned %d bytes\n", (int)n);
+    ASSERT(n == strlen(msg), "fwrite should return message length");
+
+    ret = fclose(f);
+    ASSERT(0 == ret, "fclose after write failed");
+
+    // Verify by reading back
+    f = fopen("TEST.TXT", "r");
+    ASSERT(f, "fopen(TEST.TXT, r) for verify failed");
+
+    memset(buf, 0, sizeof(buf));
+    n = fread(buf, 1, 64, f);
+    printf("Read back %d bytes: '%s'\n", (int)n, buf);
+    ASSERT(n == strlen(msg), "fread should return message length");
+    ASSERT(0 == strcmp(buf, msg), "Read content should match written content");
+
+    fclose(f);
+
+    printf("=== All stdio tests passed! ===\n");
+
     return 0;
 }

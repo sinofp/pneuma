@@ -106,9 +106,10 @@ if [[ $use_dts == true && $use_uboot == false ]] {
     qemu_machine="virt,dumpdtb=virt-${arch}.dtb"
 }
 
-pushd disk
-tar cf ../disk.tar --format=ustar *.txt
-popd
+# Use FAT disk image from build output (copy to writable location)
+local disk_img=disk-$arch.img
+cp result-$arch/disk.img $disk_img
+chmod +w $disk_img
 
 # Create boot disk for U-Boot if needed
 local boot_disk_args=""
@@ -132,7 +133,7 @@ if [[ $use_uboot == true ]] {
 local qemu_common_args="-machine $qemu_machine \
       -bios $opensbi_fw -kernel $qemu_kernel \
       --no-reboot -nographic -serial mon:stdio \
-      -drive id=drive0,file=disk.tar,format=raw,if=none \
+      -drive id=drive0,file=$disk_img,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
       $boot_disk_args"
 

@@ -1,1 +1,1 @@
-askldfjlsajfklsjf
+Hello from FAT filesystem!

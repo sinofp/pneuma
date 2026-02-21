@@ -16,6 +16,19 @@ void *memset(void *b, int c, size_t len) {
     return b;                                 // C Manual: 'Returns its first argument'
 }
 
+int memcmp(const void *s1, const void *s2, size_t n) {
+    // C Manual: compares byte string s1 against byte string s2
+    // I think byte is identical to char, but let's be explicit and direct
+    auto *p1 = static_cast<const uint8_t *>(s1);
+    auto *p2 = static_cast<const uint8_t *>(s2);
+    for (size_t i = 0; i < n; ++i)
+        if (p1[i] != p2[i])
+            // C Manual: treated as unsigned char values, so that ‘\200’ is greater than ‘\0’, for example
+            // We don't cast char to unsigned char in strcmp, but uint8_t and unsigned char has semantic difference here
+            return static_cast<unsigned char>(p1[i]) - static_cast<unsigned char>(p2[i]);
+    return 0;
+}
+
 char *strcpy(char *dst, const char *src) {
     size_t i;
     for (i = 0; src[i] != '\0'; ++i)
@@ -38,4 +51,14 @@ size_t strlen(const char *s) {
     for (i = 0; '\0' != s[i]; ++i) {
     }
     return i;
+}
+
+char *strchr(const char *s, int c) {
+    for (; '\0' != *s; ++s)
+        if (*s == static_cast<char>(c))
+            // Returning a char* out of a const char* is very bizarre
+            return const_cast<char *>(s);
+
+    // C Manual: if c is ‘\0’, the functions locate the terminating ‘\0’
+    return ('\0' == c) ? const_cast<char *>(s) : NULL;
 }

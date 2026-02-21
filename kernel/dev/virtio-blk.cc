@@ -59,7 +59,7 @@ void init() {
     // Enumerate all virtio devices and find the smallest block device (likely disk.tar)
     paddr_t selected_base = 0;
     uint32_t selected_irq = 0;
-    uint64_t smallest_capacity = UINT64_MAX;
+    uint64_t biggest_capacity = 0;
     size_t blk_device_count = 0;
 
     printf("virtio-blk: Found %ld virtio devices\n", static_cast<long>(fdt::virtio_device_count));
@@ -83,9 +83,10 @@ void init() {
         printf("  Device %ld: MMIO=0x%lx, capacity=%ld bytes\n", static_cast<long>(i),
                static_cast<unsigned long>(mmio_base), static_cast<long>(cap));
 
-        // Select the smallest capacity device (disk.tar)
-        if (cap < smallest_capacity) {
-            smallest_capacity = cap;
+        // TODO better probe and deciding
+        // Select the biggest capacity device (32MB FAT16 disk.img)
+        if (biggest_capacity < cap) {
+            biggest_capacity = cap;
             selected_base = mmio_base;
             selected_irq = fdt::virtio_devices[i].irq;
         }
@@ -106,7 +107,7 @@ void init() {
 
     printf("virtio-blk: Selected device at MMIO=0x%lx, IRQ=%d, capacity=%ld bytes (blk_devices=%ld)\n",
            static_cast<unsigned long>(base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
-           static_cast<long>(smallest_capacity), static_cast<long>(blk_device_count));
+           static_cast<long>(biggest_capacity), static_cast<long>(blk_device_count));
 
     // Now initialize the selected device
     if (mmio::read<uint32_t>(base, REG_MAGIC) != 0x74726976)

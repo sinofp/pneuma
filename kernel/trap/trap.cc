@@ -1,7 +1,6 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
 #include "dev/virtio.h"
-#include "fs/file.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
@@ -185,36 +184,48 @@ void handle_syscall(trap::frame *f) {
         proc::current->state = proc::state_t::UNUSED;
         proc::reschedule();
         PANIC("unreachable");
-    case SYS_READFILE:
-    case SYS_WRITEFILE: {
-        size_t i = f->a0;
+    case SYS_DISK_READ:
+    case SYS_DISK_WRITE: {
+        size_t sector = f->a0;
         auto *buf = reinterpret_cast<char *>(f->a1);
-        size_t len = f->a2;
 
-        if (FILES_MAX <= i or (i < FILES_MAX and fs::files[i].name[0] == '\0')) {
-            printf("file descriptor not found: %d\n", i);
-            f->a0 = -1;
+        // Validate sector is within disk capacity
+        if (sector >= virtio::blk::capacity) {
+            printf("disk: sector %lld out of range (capacity: %lld)\n", sector, virtio::blk::capacity);
+            f->a0 = static_cast<xlen_t>(-1);
             break;
         }
 
-        auto *fl = &fs::files[i];
-        printf("%s %s\n", (f->a3 == SYS_WRITEFILE) ? "Writing" : "Reading", fl->name);
+        // Validate user buffer address
+        if (reinterpret_cast<vaddr_t>(buf) < proc::USER_BASE) {
+            printf("disk: invalid buffer address 0x%lx\n", f->a1);
+            f->a0 = static_cast<xlen_t>(-1);
+            break;
+        }
 
-        if (len > sizeof(fl->data))
-            len = fl->size;
-
-        if (f->a3 == SYS_WRITEFILE) {
-            memcpy(fl->data, buf, len);
-            fl->size = len;
-            fs::ustar::flush();
-        } else
-            memcpy(buf, fl->data, len);
-
-        f->a0 = len;
+        int is_write = (SYS_DISK_WRITE == f->a3) ? 1 : 0;
+        virtio::blk::read_write(buf, sector, is_write);
+        f->a0 = 0; // Success
     } break;
     case SYS_SLEEP:
         proc::sleep_ms(f->a0);
         break;
+    case SYS_DISK_IOCTL: {
+        switch (f->a0) {
+        case DISK_IOCTL_GET_SECTOR_COUNT:
+            f->a0 = static_cast<xlen_t>(virtio::blk::capacity);
+            break;
+        case DISK_IOCTL_GET_SECTOR_SIZE:
+            f->a0 = 512; // Standard sector size
+            break;
+        case DISK_IOCTL_GET_BLOCK_SIZE:
+            f->a0 = 1; // Block erase granularity in sectors
+            break;
+        default:
+            f->a0 = static_cast<xlen_t>(-1);
+            break;
+        }
+    } break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }

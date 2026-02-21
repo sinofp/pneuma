@@ -150,6 +150,13 @@
           objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
+          # Fetch FatFs source
+          fatfs-src = pkgs.fetchzip {
+            url = "https://elm-chan.org/fsw/ff/arc/ff16.zip";
+            hash = "sha256-FyN+We8M68pxtltRrRgc8L8bpWhsnQMYfRLxIQNE1Bg=";
+            stripRoot = false;
+          };
+
           # Helper to find files recursively
           findFiles =
             dir: suffix:
@@ -174,7 +181,8 @@
           kernelHeaders = findFiles ./kernel ".h";
 
           # Source file lists for libc and user programs
-          libcSources = findFiles ./libc/src ".cc";
+          libcCxxSources = findFiles ./libc/src ".cc";
+          libcCSources = findFiles ./libc/src ".c";
           libcHeaders = findFiles ./libc/include ".h";
           userPrograms = (findFiles ./user ".cc") ++ (findFiles ./user ".c");
 
@@ -199,22 +207,155 @@
             in
             lib.removePrefix libcIncludeDir pathStr;
 
-          # Helper function to build kernel with embedded shell for a specific architecture
+          # Get relative path within libc/src directory
+          libcSrcRelPath =
+            path:
+            let
+              pathStr = toString path;
+              libcSrcDir = toString ./libc/src + "/";
+            in
+            lib.removePrefix libcSrcDir pathStr;
+
+          # Compiler flags for each architecture
+          mkFlags =
+            arch: includeDir:
+            let
+              cfg = archConfigs.${arch};
+              pie = if arch == "riscv64" then "-fPIE" else "";
+              common = "-g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+            in
+            {
+              # Kernel C++ flags
+              kernel = "-std=c++2c ${common} -fno-exceptions -I kernel";
+              # User C++ flags
+              cxx = "-std=c++2c ${common} -fno-exceptions -nostdlibinc -isystem ${includeDir}";
+              # User C flags
+              c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir}";
+              # FatFs C flags (relaxed warnings for third-party code)
+              fatfs = "-std=c2x -g3 --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
+            };
+
+          # Build libc + FatFs for a specific architecture
+          mkLibc =
+            arch:
+            let
+              flags = mkFlags arch "include";
+            in
+            pkgs.runCommand "libc-${arch}"
+              {
+                nativeBuildInputs = [ pkgs.llvmPackages_latest.clang-unwrapped ];
+              }
+              ''
+                mkdir -p $out
+
+                # Copy libc headers
+                mkdir -p include
+                ${lib.concatMapStringsSep "\n" (
+                  path:
+                  let
+                    relPath = libcIncludeRelPath path;
+                    dir = builtins.dirOf relPath;
+                  in
+                  ''
+                    mkdir -p include/${dir}
+                    cp ${path} include/${relPath}
+                  ''
+                ) libcHeaders}
+
+                # Copy libc sources
+                mkdir -p src
+                ${lib.concatMapStringsSep "\n" (
+                  path:
+                  let
+                    relPath = libcSrcRelPath path;
+                    dir = builtins.dirOf relPath;
+                  in
+                  ''
+                    mkdir -p src/${dir}
+                    cp ${path} src/${relPath}
+                  ''
+                ) (libcCxxSources ++ libcCSources)}
+
+                # Copy FatFs source files from upstream
+                mkdir -p fatfs
+                cp ${fatfs-src}/source/ff.c fatfs/
+                cp ${fatfs-src}/source/ff.h fatfs/
+                cp ${fatfs-src}/source/diskio.h fatfs/
+                cp ${fatfs-src}/source/ffconf.h fatfs/ffconf.h
+                # Patch ffconf.h to switch from Japnese to U.S.
+                sed -i 's|^#define FF_CODE_PAGE.*|#define FF_CODE_PAGE 437|' fatfs/ffconf.h
+                # I don't want to implement get_fattime()
+                sed -i 's|^#define FF_FS_NORTC.*|#define FF_FS_NORTC 1|' fatfs/ffconf.h
+                # Copy our custom diskio implementation
+                cp ${./libc/fatfs/diskio.c} fatfs/diskio.c
+
+                # Compile FatFs
+                ${clang} ${flags.fatfs} -I fatfs -c -o $out/fatfs-ff.o fatfs/ff.c
+                ${clang} ${flags.fatfs} -I fatfs -c -o $out/fatfs-diskio.o fatfs/diskio.c
+
+                # Compile libc C++ sources
+                ${lib.concatMapStringsSep "\n" (
+                  src:
+                  let
+                    relPath = libcSrcRelPath src;
+                    name = lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] relPath);
+                  in
+                  ''
+                    ${clang} ${flags.cxx} -I fatfs -c -o $out/libc-${name}.o src/${relPath}
+                  ''
+                ) libcCxxSources}
+
+                # Compile libc C sources
+                ${lib.concatMapStringsSep "\n" (
+                  src:
+                  let
+                    relPath = libcSrcRelPath src;
+                    name = lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] relPath);
+                  in
+                  ''
+                    ${clang} ${flags.c} -I fatfs -c -o $out/libc-${name}.o src/${relPath}
+                  ''
+                ) libcCSources}
+
+                # Also copy headers and linker script for user programs
+                cp -r include $out/include
+                cp ${./user/user.ld} $out/user.ld
+              '';
+
+          # Build kernel with embedded user programs
           mkKernel =
             arch:
             let
               cfg = archConfigs.${arch};
-              # Use -fPIE to avoid linker error on RV64. -mcmodel=medany doesn't help.
-              pie = if arch == "riscv64" then "-fPIE" else "";
-              ccflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -I kernel";
-              userCxxflags = "-std=c++2c -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions ${pie} -nostdlibinc -isystem libc/include";
-              userCflags = "-std=c2x -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
+              libc = mkLibc arch;
+              flags = mkFlags arch "${libc}/include";
+
+              # List all libc object files
+              libcCxxObjs = map (
+                p:
+                "${libc}/libc-${
+                  lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
+                }.o"
+              ) libcCxxSources;
+              libcCObjs = map (
+                p:
+                "${libc}/libc-${
+                  lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
+                }.o"
+              ) libcCSources;
+              fatfsObjs = [
+                "${libc}/fatfs-ff.o"
+                "${libc}/fatfs-diskio.o"
+              ];
+              allLibcObjs = libcCxxObjs ++ libcCObjs ++ fatfsObjs;
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
                 nativeBuildInputs = with pkgs.llvmPackages_latest; [
                   clang-unwrapped
                   bintools-unwrapped
+                  pkgs.dosfstools
+                  pkgs.mtools
                 ];
               }
               ''
@@ -224,36 +365,9 @@
                 cp -r ${./kernel} kernel
                 chmod -R u+w kernel
 
-                # Copy libc directory structure
-                mkdir -p libc/include/sys libc/src
-                ${lib.concatMapStringsSep "\n" (path: "cp ${path} libc/src/${basename path}") libcSources}
-                ${lib.concatMapStringsSep "\n" (
-                  path:
-                  let
-                    relPath = libcIncludeRelPath path;
-                    dir = builtins.dirOf relPath;
-                  in
-                  ''
-                    mkdir -p libc/include/${dir}
-                    cp ${path} libc/include/${relPath}
-                  ''
-                ) libcHeaders}
-
                 # Copy user directory
                 mkdir -p user
                 ${lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
-                cp ${./user/user.ld} user/user.ld
-
-                # Compile libc sources (all C++)
-                ${lib.concatMapStringsSep "\n" (
-                  src:
-                  let
-                    name = lib.removeSuffix ".cc" (basename src);
-                  in
-                  ''
-                    ${clang} ${userCxxflags} -c -o libc-${name}.o libc/src/${basename src}
-                  ''
-                ) libcSources}
 
                 # Build user programs
                 ${lib.concatMapStringsSep "\n" (
@@ -262,19 +376,17 @@
                     progFile = basename prog;
                     name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
                     isC = lib.hasSuffix ".c" progFile;
-                    progFlags = if isC then userCflags else userCxxflags;
+                    progFlags = if isC then flags.c else flags.cxx;
                   in
                   ''
                     # Build ${name}.elf
                     ${clang} ${progFlags} -c -o user-${name}.o user/${progFile}
-                    ${clang} ${userCxxflags} \
+                    ${clang} ${flags.cxx} \
                       --ld-path=${lld} \
-                      -Wl,-Tuser/user.ld \
+                      -Wl,-T${libc}/user.ld \
                       -Wl,-Map=$out/${name}.map \
                       -o $out/${name}.elf \
-                      ${
-                        lib.concatStringsSep " " (map (p: "libc-${lib.removeSuffix ".cc" (basename p)}.o") libcSources)
-                      } user-${name}.o
+                      ${lib.concatStringsSep " " allLibcObjs} user-${name}.o
 
                     # Convert to binary and ELF object
                     ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
@@ -285,7 +397,7 @@
                 ) userPrograms}
 
                 # Build kernel.elf with embedded user programs
-                ${clang} ${ccflags} \
+                ${clang} ${flags.kernel} \
                   --ld-path=${lld} \
                   -Wl,-Tkernel/kernel.ld \
                   -Wl,-Map=$out/kernel.map \
@@ -299,46 +411,61 @@
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image
+
+                # Create FAT disk image (32MB FAT16, must be bigger than kernel image to be selected as disk in virtio-blk.cc)
+                dd if=/dev/zero of=$out/disk.img bs=1M count=32
+                mkfs.fat -F 16 $out/disk.img
+                # Copy files from disk/ directory if it exists
+                for f in ${./disk}/*; do
+                  if [ -f "$f" ]; then
+                    mcopy -i $out/disk.img "$f" "::$(basename "$f")"
+                  fi
+                done
               '';
 
           # Helper function to generate compile_commands.json for clangd
           mkCompileCommands =
             arch:
             let
-              cfg = archConfigs.${arch};
-              pie = if arch == "riscv64" then "-fPIE" else "";
-              ccflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -I kernel";
-              userCxxflags = "-std=c++2c -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
-              userCflags = "-std=c2x -O2 -g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem libc/include";
+              flags = mkFlags arch "libc/include";
 
               # Generate entries for kernel sources
               kernelEntries = map (src: {
                 directory = ".";
-                command = "${clang} ${ccflags} -c kernel/${kernelRelPath src}";
+                command = "${clang} ${flags.kernel} -c kernel/${kernelRelPath src}";
                 file = "kernel/${kernelRelPath src}";
               }) kernelSources;
 
-              # Generate entries for libc sources (need -isystem libc/include)
-              libcEntries = map (src: {
+              # Generate entries for libc C++ sources
+              libcCxxEntries = map (src: {
                 directory = ".";
-                command = "${clang} ${userCxxflags} -c libc/src/${basename src}";
-                file = "libc/src/${basename src}";
-              }) libcSources;
+                command = "${clang} ${flags.cxx} -I libc/fatfs -c libc/src/${libcSrcRelPath src}";
+                file = "libc/src/${libcSrcRelPath src}";
+              }) libcCxxSources;
 
-              # Generate entries for user programs (need -isystem libc/include)
-              userEntries = map (src:
+              # Generate entries for libc C sources
+              libcCEntries = map (src: {
+                directory = ".";
+                command = "${clang} ${flags.c} -I libc/fatfs -c libc/src/${libcSrcRelPath src}";
+                file = "libc/src/${libcSrcRelPath src}";
+              }) libcCSources;
+
+              # Generate entries for user programs
+              userEntries = map (
+                src:
                 let
                   file = basename src;
                   isC = lib.hasSuffix ".c" file;
-                  flags = if isC then userCflags else userCxxflags;
-                in {
+                  progFlags = if isC then flags.c else flags.cxx;
+                in
+                {
                   directory = ".";
-                  command = "${clang} ${flags} -c user/${file}";
+                  command = "${clang} ${progFlags} -c user/${file}";
                   file = "user/${file}";
                 }
               ) userPrograms;
 
-              entries = kernelEntries ++ libcEntries ++ userEntries;
+              entries = kernelEntries ++ libcCxxEntries ++ libcCEntries ++ userEntries;
               jsonContent = builtins.toJSON entries;
 
             in
@@ -355,8 +482,7 @@
         {
           rv32 = build32;
           rv64 = build64;
-          default = build32;
-
+          default = build64;
           compile-commands = mkCompileCommands "riscv64";
         }
       );
