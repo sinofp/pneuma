@@ -3,6 +3,8 @@
 #include "fdt/fdt.h"
 #include "mem/mem.h"
 #include "proc/proc.h"
+#include "proc/qtab.h"
+#include "trap/csr.h"
 #include "trap/plic.h"
 
 namespace virtio::blk {
@@ -13,6 +15,7 @@ paddr_t req_paddr;
 uint64_t capacity;
 bool use_shifted_pfn = false;
 paddr_t base = fdt::uninitialised;
+proc::process *waiting_proc = nullptr;
 } // namespace virtio::blk
 
 namespace {
@@ -104,6 +107,7 @@ void init() {
 
     base = selected_base;
     plic::VIRTIO_BLK_IRQ = selected_irq;
+    plic::enable_irq(plic::VIRTIO_BLK_IRQ);
 
     printf("virtio-blk: Selected device at MMIO=0x%lx, IRQ=%d, capacity=%ld bytes (blk_devices=%ld)\n",
            static_cast<unsigned long>(base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
@@ -128,7 +132,7 @@ void init() {
     // 7. Perform device-specific setup, including discovery of virtqueues for the device
     request_vq = virtq_init(0);
     // 8. Set the DRIVER_OK status bit.
-    mmio::write<uint32_t>(base, REG_DEVICE_STATUS, STATUS_DRIVER_OK);
+    virtio_reg_fetch_and_or32(REG_DEVICE_STATUS, STATUS_DRIVER_OK);
 
     // Get the disk capacity.
     capacity = mmio::read<uint64_t>(base, REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
@@ -140,7 +144,7 @@ void init() {
     req = reinterpret_cast<req_t *>(req_paddr);
 
     // Disable interrupt suppression in the virtqueue
-    // request_vq->avail.flags &= ~VIRTQ_AVAIL_F_NO_INTERRUPT;
+    request_vq->avail.flags &= ~VIRTQ_AVAIL_F_NO_INTERRUPT;
 }
 } // namespace blk
 
@@ -183,9 +187,6 @@ void read_write(void *buf, uint64_t sector, int is_write) {
         return;
     }
 
-    printf("  read_write_disk: %s sector %ld to buf@%p\n", is_write ? "write" : "read",
-           static_cast<unsigned long>(sector), buf);
-
     // virtio spec: '1. The driver places the buffer into free descriptor(s) in the descriptor table, chaining as
     // necessary'
     req->sector = sector;
@@ -209,14 +210,15 @@ void read_write(void *buf, uint64_t sector, int is_write) {
     vq->descs[2].len = sizeof(uint8_t);
     vq->descs[2].flags = VIRTQ_DESC_F_WRITE;
 
+    waiting_proc = proc::current;
+    waiting_proc->state = proc::state_t::SUSPENDED;
     // Notify the device that there is a new request.
     virtq_kick(vq, 0);
+    // The interrupt might also fire here, triggering handle_io_completion before entering reschedule.
+    // It's fine because we allow switching to itself in reschedule specifically for this case.
+    proc::reschedule();
 
-    // Wait until the device finishes processing.
-    while (virtq_is_busy(vq))
-        ;
-
-    // Check if the operation succeeded
+    // Resumed by interrupt and rescheduling, check if the operation succeeded
     if (req->status != 0) {
         printf("virtio: warn: failed to read/write sector=%ld status=%ld\n", static_cast<unsigned long>(sector),
                static_cast<unsigned long>(req->status));
@@ -224,14 +226,19 @@ void read_write(void *buf, uint64_t sector, int is_write) {
     }
 
     // For read operations, copy the data into the buffer.
-    if (!is_write) {
-        // printf("  read_write_disk: coping %d bytes from req->data@%p to buf%p\n", SECTOR_SIZE, req->data,
-        // buf); printf("  First 4 bytes as hex: "); for (int i = 0; i < 4; i++) {
-        //     printf("%lx ", static_cast<unsigned long>(req->data[i]));
-        // }
+    if (!is_write)
         memcpy(buf, req->data, SECTOR_SIZE);
+}
+
+void handle_io_completion() {
+    // Acknowledge device interrupt
+    auto status = mmio::read<uint32_t>(base, REG_INTERRUPT_STATUS);
+    mmio::write<uint32_t>(base, REG_INTERRUPT_ACK, status);
+
+    if (waiting_proc) {
+        ready(waiting_proc, false);
+        waiting_proc = nullptr;
     }
-    // printf("\n\n");
 }
 
 } // namespace blk

@@ -265,10 +265,10 @@ extern "C" void handle_trap(trap::frame *f) {
     case SExternalIntr: {
         // External interrupt from PLIC
         if (auto irq = plic::claim(0)) {
-            // if (irq == plic::VIRTIO_BLK_IRQ)
-            //     virtio_blk_intr();
-            // else
-            printf("Unexpected IRQ: %d\n", irq);
+            if (irq == plic::VIRTIO_BLK_IRQ)
+                virtio::blk::handle_io_completion();
+            else
+                printf("Unexpected IRQ: %d\n", irq);
             plic::complete(0, irq);
         }
         break;

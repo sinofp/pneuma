@@ -303,7 +303,15 @@ void reschedule() {
                  :
                  : [sscratch] "r"(kernel_stack));
 
-    // Context switch
+    // Skip switch_context if switching to ourselves.
+    // This can happen if interrupt woke us before reschedule.
+    // i.e. we set the current to SUSPENDED, and then call reschedule,
+    // but the interrupt handler calls ready(current, false), before entering reschedule
+    if (next == current) {
+        current->state = RUNNING;
+        return;
+    }
+
     process *prev = current;
     current = next;
     current->state = RUNNING;
@@ -312,7 +320,6 @@ void reschedule() {
     switch_context(&prev->sp, next->sp);
     // printf("reschedule: Returned from switching from (pid=%d, sp=%proc) to (pid=%d, sp=%proc)\n", prev->pid,
     //        reinterpret_cast<void *>(prev->sp), next->pid, reinterpret_cast<void *>(next->sp));
-    // TODO print SIE and SPIE
 }
 
 } // namespace proc

@@ -55,8 +55,7 @@ int main(void) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
     size_t n = fread(buf, 1, 27, f);
-    printf("fread returned %d bytes: '%s'\n", (int)n, buf);
-    ASSERT(n == 27, "fread should return 27 bytes");
+    ASSERT(!strcmp("Hello from FAT filesystem!\n", buf), "fread HELLO.TXT should return 'Hello from FAT filesystem!\\n'");
 
     // Test ftell after read
     pos = ftell(f);
@@ -85,7 +84,6 @@ int main(void) {
     // Test fwrite
     const char *msg = "Written by libc-test!";
     n = fwrite(msg, 1, strlen(msg), f);
-    printf("fwrite returned %d bytes\n", (int)n);
     ASSERT(n == strlen(msg), "fwrite should return message length");
 
     ret = fclose(f);
@@ -97,13 +95,42 @@ int main(void) {
 
     memset(buf, 0, sizeof(buf));
     n = fread(buf, 1, 64, f);
-    printf("Read back %d bytes: '%s'\n", (int)n, buf);
     ASSERT(n == strlen(msg), "fread should return message length");
     ASSERT(0 == strcmp(buf, msg), "Read content should match written content");
 
     fclose(f);
 
     printf("=== All stdio tests passed! ===\n");
+
+    printf("\n=== Testing large file I/O ===\n");
+    f = fopen("LARGE.TXT", "w");
+    ASSERT(f, "fopen(LARGE.TXT, w) failed");
+
+    char large_buf[4096];
+    for (int i = 0; i < 4096; i++)
+        large_buf[i] = 'A' + (i % 26);
+
+    n = fwrite(large_buf, 1, 4096, f);
+    ASSERT(n == 4096, "fwrite 4096 failed");
+    fclose(f);
+
+    f = fopen("LARGE.TXT", "r");
+    ASSERT(f, "fopen(LARGE.TXT, r) for verify failed");
+
+    char verify[4096];
+    n = fread(verify, 1, 4096, f);
+    ASSERT(n == 4096, "fread 4096 failed");
+
+    int verify_ok = 1;
+    for (int i = 0; i < 4096; i++) {
+        if (verify[i] != large_buf[i]) {
+            verify_ok = 0;
+            break;
+        }
+    }
+    ASSERT(verify_ok, "verify failed");
+    fclose(f);
+    printf("=== Large file test passed ===\n");
 
     return 0;
 }

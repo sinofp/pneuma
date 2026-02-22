@@ -101,6 +101,7 @@ bool virtq_is_busy(virtq *vq);
 namespace blk {
 void init();
 void read_write(void *buf, uint64_t sector, int is_write);
+void handle_io_completion();
 
 extern virtq *request_vq;
 extern paddr_t vq_paddr;

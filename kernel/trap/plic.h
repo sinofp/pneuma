@@ -16,19 +16,23 @@ constexpr size_t spacing = 4;
 extern paddr_t start_addr;
 extern paddr_t end_addr;
 
-constexpr size_t priority_base = 0x0000'0004;
+constexpr size_t priority_base = 0x0000'0000;
 constexpr size_t hart0_s_intr_en = 0x0000'2080;
 
 constexpr size_t hart0_s_prio_threshold = 0x0020'1000;
 constexpr size_t hart0_s_claim_complete = 0x0020'1004;
 
 inline void init() {
-    // Set priority for VirtIO block device interrupt and enable
-    mmio::write(start_addr, priority_base + VIRTIO_BLK_IRQ * 4, 1);
-    mmio::write(start_addr, hart0_s_intr_en, 1u << VIRTIO_BLK_IRQ);
-
-    // Accept all interrupts
+    // Accept all interrupts (threshold = 0)
     mmio::write(start_addr, hart0_s_prio_threshold, 0);
+}
+
+inline void enable_irq(uint32_t irq) {
+    // Set priority for this IRQ
+    mmio::write(start_addr, priority_base + irq * 4, 1);
+    // Enable this IRQ in the enable register
+    auto current = mmio::read<uint32_t>(start_addr, hart0_s_intr_en);
+    mmio::write(start_addr, hart0_s_intr_en, current | (1u << irq));
 }
 
 inline uint32_t claim(size_t i) {

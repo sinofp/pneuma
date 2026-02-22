@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/misc.h>
 
 namespace {
 
@@ -28,6 +29,9 @@ int readline(char *buf, int len) {
 } // namespace
 
 extern "C" void main(void) {
+    // Wait until libc-test finishes, as we now have interrupt-based disk IO
+    sleep_ms(50);
+
     for (;;) {
         printf("> ");
         char cmdline[128];
