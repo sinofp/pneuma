@@ -6,6 +6,10 @@
 // vaddr_t equivalent for user space
 using vaddr_t = uintptr_t;
 
+// Standard streams (stubs - point to nothing for now)
+FILE *stdout = nullptr;
+FILE *stderr = nullptr;
+
 int putchar(int ch) { return syscall(SYS_PUTCHAR, ch, 0, 0); }
 
 int getchar() { return syscall(SYS_GETCHAR, 0, 0, 0); }

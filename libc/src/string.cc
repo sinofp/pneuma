@@ -62,3 +62,49 @@ char *strchr(const char *s, int c) {
     // C Manual: if c is ‘\0’, the functions locate the terminating ‘\0’
     return ('\0' == c) ? const_cast<char *>(s) : NULL;
 }
+
+// TODO: Implement for Doom
+void *memmove(void *dst, const void *src, size_t n) {
+    (void) dst;
+    (void) src;
+    (void) n;
+    return dst;
+}
+
+char *strncpy(char *dst, const char *src, size_t n) {
+    (void) dst;
+    (void) src;
+    (void) n;
+    return dst;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n) {
+    (void) s1;
+    (void) s2;
+    (void) n;
+    return 0;
+}
+
+char *strrchr(const char *s, int c) {
+    (void) s;
+    (void) c;
+    return NULL;
+}
+
+char *strstr(const char *haystack, const char *needle) {
+    (void) haystack;
+    (void) needle;
+    return NULL;
+}
+
+char *strdup(const char *s) {
+    (void) s;
+    return NULL;
+}
+
+int snprintf(char *str, size_t size, const char *format, ...) {
+    (void) str;
+    (void) size;
+    (void) format;
+    return 0;
+}

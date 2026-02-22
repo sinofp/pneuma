@@ -16,14 +16,21 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
 
       # Architecture configurations
+      # IMD: base integer + integer multiply/divide + double-float for DOOM
+      # zicsr: CSR instructions for kernel
+      # zifencei: FENCE.I instruction for memory fences
       archConfigs = {
         riscv32 = {
           target = "riscv32-unknown-elf";
           elfFormat = "elf32-littleriscv";
+          march = "rv32imd_zicsr_zifencei";
+          mabi = "ilp32d";
         };
         riscv64 = {
           target = "riscv64-unknown-elf";
           elfFormat = "elf64-littleriscv";
+          march = "rv64imd_zicsr_zifencei";
+          mabi = "lp64d";
         };
       };
 
@@ -157,6 +164,14 @@
             stripRoot = false;
           };
 
+          # Fetch doomgeneric source
+          doomgeneric-src = pkgs.fetchFromGitHub {
+            owner = "ozkl";
+            repo = "doomgeneric";
+            rev = "fc601639494e089702a1ada082eb51aaafc03722";
+            hash = "sha256-JGa7gTvSvxlmCLw9E+RDMt5RRjorNuA0GnC1kU9xnZ0=";
+          };
+
           # Helper to find files recursively
           findFiles =
             dir: suffix:
@@ -184,7 +199,9 @@
           libcCxxSources = findFiles ./libc/src ".cc";
           libcCSources = findFiles ./libc/src ".c";
           libcHeaders = findFiles ./libc/include ".h";
-          userPrograms = (findFiles ./user ".cc") ++ (findFiles ./user ".c");
+          userPrograms = builtins.filter (p: !lib.hasSuffix "doomgeneric_rv.c" (toString p)) (
+            (findFiles ./user ".cc") ++ (findFiles ./user ".c")
+          );
 
           # Helper to get just the filename from a path
           basename = path: builtins.baseNameOf (toString path);
@@ -222,7 +239,8 @@
             let
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
-              common = "-g3 -Wall -Wextra --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+              archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
+              common = "-g3 -Wall -Wextra ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
             in
             {
               # Kernel C++ flags
@@ -232,7 +250,7 @@
               # User C flags
               c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir}";
               # FatFs C flags (relaxed warnings for third-party code)
-              fatfs = "-std=c2x -g3 --target=${cfg.target} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
+              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
             };
 
           # Build libc + FatFs for a specific architecture
@@ -322,6 +340,99 @@
                 cp ${./user/user.ld} $out/user.ld
               '';
 
+          # Build Doom for a specific architecture
+          mkDoom =
+            arch:
+            let
+              cfg = archConfigs.${arch};
+              libc = mkLibc arch;
+              flags = mkFlags arch "${libc}/include";
+
+              # Doom-specific flags (relaxed warnings for third-party code)
+              # Use -nostdinc to disable all built-in includes, then add our headers first,
+              # then clang's resource dir for stdint.h/stddef.h/stdarg.h
+              archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
+              pie = if arch == "riscv64" then "-fPIE" else "";
+              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
+
+              # List all libc object files
+              libcCxxObjs = map (
+                p:
+                "${libc}/libc-${
+                  lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
+                }.o"
+              ) libcCxxSources;
+              libcCObjs = map (
+                p:
+                "${libc}/libc-${
+                  lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
+                }.o"
+              ) libcCSources;
+              fatfsObjs = [
+                "${libc}/fatfs-ff.o"
+                "${libc}/fatfs-diskio.o"
+              ];
+              allLibcObjs = libcCxxObjs ++ libcCObjs ++ fatfsObjs;
+            in
+            pkgs.runCommand "doom-${arch}"
+              {
+                nativeBuildInputs = with pkgs.llvmPackages_latest; [
+                  clang-unwrapped
+                  bintools-unwrapped
+                ];
+              }
+              ''
+                mkdir -p $out
+
+                # Get clang's resource directory for built-in headers (stdint.h, stddef.h, etc.)
+                CLANG_RESOURCE_DIR=$(${clang} -print-resource-dir)/include
+                echo "Clang resource dir: $CLANG_RESOURCE_DIR"
+
+                # Full doom flags: our headers first (-I), then clang builtins (-isystem, searched after -I)
+                DOOM_FLAGS="${doomFlagsBase} -I${libc}/include -isystem $CLANG_RESOURCE_DIR"
+
+                # Copy doomgeneric sources to working directory
+                mkdir -p doomgeneric
+                cp ${doomgeneric-src}/doomgeneric/*.c doomgeneric/
+                cp ${doomgeneric-src}/doomgeneric/*.h doomgeneric/
+
+                sed -i 's|#include <inttypes.h>|#include <stdint.h>|' doomgeneric/doomtype.h # stdint.h is the file it really wants
+                sed -i 's|#include <unistd.h>||' doomgeneric/i_system.c # isatty is guarded by false #if
+                sed -i 's|#include <sys/types.h>|#include <stdint.h>|' doomgeneric/*.c # stdint.h is the file it really wants
+
+                # Remove platform-specific implementations we don't want
+                rm -f doomgeneric/doomgeneric_*.c
+                rm -f doomgeneric/i_sdlmusic.c
+                rm -f doomgeneric/i_sdlsound.c
+                rm -f doomgeneric/i_allegro*.c   # Allegro bindings
+                rm -f doomgeneric/i_cdmus.c      # CD music
+                rm -f doomgeneric/gusconf.c      # GUS sound card emulation
+                rm -f doomgeneric/mus2mid.c      # Some kind of MIDI thing
+                rm -f doomgeneric/icon.c
+
+                # Copy our platform layer into the same directory
+                cp ${./user/doomgeneric_rv.c} doomgeneric/
+
+                # Compile all doomgeneric sources
+                for src in doomgeneric/*.c; do
+                  name=$(basename "$src" .c)
+                  echo "Compiling: $name.c"
+                  ${clang} $DOOM_FLAGS -Idoomgeneric -c "$src" -o "$name.o"
+                done
+
+                # Link
+                echo "Linking doom.elf"
+                ${clang} $DOOM_FLAGS \
+                  --ld-path=${lld} \
+                  -Wl,-T${libc}/user.ld \
+                  -Wl,-Map=$out/doom.map \
+                  -o $out/doom.elf \
+                  *.o ${lib.concatStringsSep " " allLibcObjs}
+
+                # Convert to binary
+                ${objcopy} -O binary $out/doom.elf $out/doom.bin
+              '';
+
           # Build kernel with embedded user programs
           mkKernel =
             arch:
@@ -388,11 +499,24 @@
                       -o $out/${name}.elf \
                       ${lib.concatStringsSep " " allLibcObjs} user-${name}.o
 
-                    # Convert to binary and ELF object
+                    # Convert to binary
                     ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
-                    pushd $out
-                    ${objcopy} -I binary -O ${cfg.elfFormat} ${name}.bin ${name}.bin.o
-                    popd
+
+                    # Create assembly wrapper to embed binary with proper ABI flags
+                    # Replace - with _ for valid assembly symbols
+                    sym=${lib.replaceStrings [ "-" ] [ "_" ] name}
+                    cat > $out/${name}.S << ASMEOF
+                    .section .rodata
+                    .global _binary_''${sym}_bin_start
+                    .global _binary_''${sym}_bin_end
+                    .global _binary_''${sym}_bin_size
+                    .balign 8
+                    _binary_''${sym}_bin_start:
+                    .incbin "$out/${name}.bin"
+                    _binary_''${sym}_bin_end:
+                    .set _binary_''${sym}_bin_size, _binary_''${sym}_bin_end - _binary_''${sym}_bin_start
+                    ASMEOF
+                    ${clang} ${flags.kernel} -c $out/${name}.S -o $out/${name}.bin.o
                   ''
                 ) userPrograms}
 
@@ -478,12 +602,18 @@
           build32 = mkKernel "riscv32";
           build64 = mkKernel "riscv64";
 
+          # Build Doom for both architectures
+          doom32 = mkDoom "riscv32";
+          doom64 = mkDoom "riscv64";
+
         in
         {
           rv32 = build32;
           rv64 = build64;
           default = build64;
           compile-commands = mkCompileCommands "riscv64";
+          doom-rv32 = doom32;
+          doom-rv64 = doom64;
         }
       );
     };
