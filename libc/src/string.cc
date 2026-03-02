@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
@@ -7,6 +8,26 @@ void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
     for (size_t i = 0; i < n; ++i)
         d[i] = s[i];
     return dst; // C Manual: 'Returns the original value of dst'
+}
+
+void *memmove(void *dst, const void *src, size_t n) {
+    // C Manual: The two strings may overlap; the copy is always done in a non-destructive manner.
+    auto *dst_p = static_cast<char *>(dst);
+    auto *src_p = static_cast<const char *>(src);
+    // Case 2:
+    //         | dst |
+    //    | src |
+    if (src_p < dst_p and dst_p < src_p + n) {
+        for (; 0 < n-- /* Check before decrement, to avoid size_t underflow */;)
+            dst_p[n] = src_p[n];
+        return dst;
+    }
+    // Case 1:
+    //         | dst |
+    //             | src |
+    // Case 3: no overlap
+    // They're the same: start from beginning
+    return memcpy(dst, src, n);
 }
 
 void *memset(void *b, int c, size_t len) {
@@ -31,10 +52,30 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 
 char *strcpy(char *dst, const char *src) {
     size_t i;
-    for (i = 0; src[i] != '\0'; ++i)
+    for (i = 0; '\0' != src[i]; ++i)
         dst[i] = src[i];
     dst[i] = '\0';
     return dst;
+}
+
+char *strncpy(char *dst, const char *src, size_t n) {
+    size_t i;
+    for (i = 0; n and '\0' != src[i]; --n, ++i)
+        dst[i] = src[i];
+    // If src is less than len characters long, the remainder of dst is filled with ‘\0’ characters.  Otherwise, dst is
+    // not terminated.
+    for (; n; --n, ++i)
+        dst[i] = '\0';
+    return dst;
+}
+
+char *strdup(const char *s) {
+    if (auto *p = static_cast<char *>(malloc(1 /* for \0 */ + strlen(s)))) {
+        strcpy(p, s);
+        return p;
+    }
+    // malloc sets errno to ENOMEM if returns NULL
+    return NULL;
 }
 
 int strcmp(const char *s1, const char *s2) {
@@ -44,6 +85,14 @@ int strcmp(const char *s1, const char *s2) {
     // Calling Convention: 'The C types char and unsigned char are 8-bit unsigned integers and are zero-extended when
     // stored in a RISC-V integer register.' Therefore we don't need to cast on RISC-V.
     return *s1 - *s2;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n) {
+    for (; n and *s1 and *s2 and *s1 == *s2; --n, ++s1, ++s2) {
+    }
+    // In strcmp, we always return this, because if the two strings are the same, their next chars are also the same \0
+    // However, we have n in strncmp, so we only compare the next chars if n is not exhausted
+    return n ? (*s1 - *s2) : 0;
 }
 
 size_t strlen(const char *s) {
@@ -63,48 +112,30 @@ char *strchr(const char *s, int c) {
     return ('\0' == c) ? const_cast<char *>(s) : NULL;
 }
 
-// TODO: Implement for Doom
-void *memmove(void *dst, const void *src, size_t n) {
-    (void) dst;
-    (void) src;
-    (void) n;
-    return dst;
-}
-
-char *strncpy(char *dst, const char *src, size_t n) {
-    (void) dst;
-    (void) src;
-    (void) n;
-    return dst;
-}
-
-int strncmp(const char *s1, const char *s2, size_t n) {
-    (void) s1;
-    (void) s2;
-    (void) n;
-    return 0;
-}
-
 char *strrchr(const char *s, int c) {
-    (void) s;
-    (void) c;
+    auto len = strlen(s);
+    for (auto i = strlen(s) /* the first s[i] is \0 on purpose */ + 1 /* +1 for first -- */;
+         0 < i-- /* similar to the reverse case in memmove */;) {
+        if (s[i] == static_cast<char>(c))
+            return const_cast<char *>(s + i);
+    }
     return NULL;
 }
 
 char *strstr(const char *haystack, const char *needle) {
-    (void) haystack;
-    (void) needle;
-    return NULL;
-}
+    // C Manual: If needle is an empty string, haystack is returned
+    if (!needle or '\0' == *needle)
+        return const_cast<char *>(haystack);
 
-char *strdup(const char *s) {
-    (void) s;
-    return NULL;
-}
+    // TODO https://oi-wiki.org/string/bm/
 
-int snprintf(char *str, size_t size, const char *format, ...) {
-    (void) str;
-    (void) size;
-    (void) format;
-    return 0;
+    const auto needle_len = strlen(needle);
+
+    while ('\0' != *haystack) {
+        if (!strncmp(haystack, needle, needle_len))
+            return const_cast<char *>(haystack);
+        ++haystack;
+    }
+
+    return NULL;
 }

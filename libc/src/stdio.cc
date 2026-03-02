@@ -370,6 +370,13 @@ int vfprintf(FILE *stream, const char *format, va_list ap) {
     return 0;
 }
 
+int snprintf(char *str, size_t size, const char *format, ...) {
+    (void) str;
+    (void) size;
+    (void) format;
+    return 0;
+}
+
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     (void) str;
     (void) size;

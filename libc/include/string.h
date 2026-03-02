@@ -19,7 +19,6 @@ char *strchr(const char *, int);
 char *strrchr(const char *, int);
 char *strstr(const char *, const char *);
 char *strdup(const char *);
-int snprintf(char *, size_t, const char *, ...);
 
 #ifdef __cplusplus
 }
