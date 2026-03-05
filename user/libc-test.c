@@ -234,5 +234,102 @@ int main(void) {
 
     printf("=== All string tests passed! ===\n");
 
+    printf("\n=== Testing snprintf ===\n");
+    // memset(buf, 0, sizeof(buf));
+    int r;
+
+    // %s
+    r = snprintf(buf, sizeof(buf), "%s", "Hello");
+    ASSERT(strcmp(buf, "Hello") == 0, "%s content");
+    ASSERT(r == 5, "%s return value");
+
+    // %d basic
+    r = snprintf(buf, sizeof(buf), "%d", 42);
+    ASSERT(strcmp(buf, "42") == 0, "%d basic");
+    ASSERT(r == 2, "%d return value");
+
+    // %d negative
+    snprintf(buf, sizeof(buf), "%d", -123);
+    ASSERT(strcmp(buf, "-123") == 0, "%d negative");
+
+    // width, space-padded
+    snprintf(buf, sizeof(buf), "%7d", 42);
+    ASSERT(strcmp(buf, "     42") == 0, "%7d space pad");
+
+    // zero-padded
+    snprintf(buf, sizeof(buf), "%07d", 42);
+    ASSERT(strcmp(buf, "0000042") == 0, "%07d zero pad");
+
+    // zero-pad negative
+    snprintf(buf, sizeof(buf), "%07d", -123);
+    ASSERT(strcmp(buf, "-000123") == 0, "%07d negative");
+
+    // precision on integer
+    snprintf(buf, sizeof(buf), "%7.4d", 123);
+    ASSERT(strcmp(buf, "   0123") == 0, "%7.4d");
+
+    // zero flag ignored when precision specified
+    snprintf(buf, sizeof(buf), "%07.4d", 123);
+    ASSERT(strcmp(buf, "   0123") == 0, "%07.4d zero flag ignored");
+
+    // precision + negative
+    snprintf(buf, sizeof(buf), "%7.5d", -123);
+    ASSERT(strcmp(buf, " -00123") == 0, "%7.5d negative");
+
+    // %x hex
+    snprintf(buf, sizeof(buf), "%x", 0xa);
+    ASSERT(strcmp(buf, "a") == 0, "%x hex");
+
+    // %02x zero-padded hex
+    snprintf(buf, sizeof(buf), "%02x", 0xa);
+    ASSERT(strcmp(buf, "0a") == 0, "%02x");
+    snprintf(buf, sizeof(buf), "%.2x", 0xa);
+    ASSERT(strcmp(buf, "0a") == 0, "%.2x");
+
+    // %02x zero-padded hex with width
+    snprintf(buf, sizeof(buf), "%3.2x", 0xa);
+    ASSERT(strcmp(buf, " 0a") == 0, "%3.2x");
+
+    // %s width
+    snprintf(buf, sizeof(buf), "%8s", "Hi");
+    ASSERT(strcmp(buf, "      Hi") == 0, "%8s width");
+
+    // %.3s precision truncates
+    snprintf(buf, sizeof(buf), "%.3s", "Hello");
+    ASSERT(strcmp(buf, "Hel") == 0, "%.3s truncation");
+
+    // %c
+    snprintf(buf, sizeof(buf), "%c", 'A');
+    ASSERT(strcmp(buf, "A") == 0, "%c");
+
+    // %%
+    snprintf(buf, sizeof(buf), "100%%");
+    ASSERT(strcmp(buf, "100%") == 0, "%%");
+
+    // truncation: return value is would-have-been length
+    r = snprintf(buf, 4, "%d", 123456);
+    ASSERT(strcmp(buf, "123") == 0, "truncation content");
+    ASSERT(r == 6, "truncation return value");
+
+    // multiple format specifiers
+    snprintf(buf, sizeof(buf), "%d + %d = %d", 1, 2, 3);
+    ASSERT(strcmp(buf, "1 + 2 = 3") == 0, "multiple specifiers");
+
+    // %i same as %d
+    snprintf(buf, sizeof(buf), "%i", 42);
+    ASSERT(strcmp(buf, "42") == 0, "%i");
+
+    // %.0d on 0 produces empty (only digits, padded by spaces via width)
+    snprintf(buf, sizeof(buf), "%5.3d", 0);
+    ASSERT(strcmp(buf, "  000") == 0, "%5.3d on 0");
+    snprintf(buf, sizeof(buf), "%5.0d", 0);
+    ASSERT(strcmp(buf, "     ") == 0, "%5.0d on 0");
+
+    // . implies zero precision
+    snprintf(buf, sizeof(buf), "%5.d", 0);
+    ASSERT(strcmp(buf, "     ") == 0, "%5.d on 0");
+
+    printf("=== All snprintf tests passed! ===\n");
+
     return 0;
 }

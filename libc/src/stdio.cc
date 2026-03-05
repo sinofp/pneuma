@@ -1,6 +1,7 @@
 #include "ff.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/syscall.h>
 
 // vaddr_t equivalent for user space
@@ -255,31 +256,129 @@ void perror(const char *s) {
 // printf family
 
 namespace {
-template <typename T> void print_hex(T value) {
-    // If i is auto (size_t), --i will also be positive
-    for (int i = sizeof(T) * 2 - 1; i >= 0; --i) {
+
+struct nullopt_t {};
+
+constexpr nullopt_t nullopt;
+
+template <typename T> class optional {
+    // T is always constructed, this is wrong, but fine because we only use int types
+    T v;
+    bool has;
+
+public:
+    // I don't allow create an empty option this way
+    constexpr optional() noexcept = delete;
+
+    constexpr optional(nullopt_t) noexcept
+        : v{}
+        , has{ false } {}
+
+    optional(T v_)
+        : v{ v_ }
+        , has{ true } {}
+
+    constexpr explicit operator bool() const noexcept { return has; }
+
+    constexpr T &value() & { return v; }
+};
+
+template <typename T> T max(T a, T b) { return a < b ? b : a; }
+
+template <typename T> T min(T a, T b) { return a < b ? a : b; }
+
+template <typename T>
+void print_hex(T value, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
+               optional<size_t> precision = nullopt) {
+    size_t width = 0;
+    for (; value >> (width * 4) & 0xf; ++width) {
+    }
+
+    if (minimum_width) {
+        size_t minimum = minimum_width.value();
+        size_t digits = width;
+        if (precision) {
+            digits = max(width, precision.value());
+            padding = ' ';
+        }
+        for (; digits < minimum; --minimum)
+            print_char(padding);
+    }
+
+    if (precision and width < precision.value()) {
+        size_t minimum = precision.value();
+        for (; width < minimum; --minimum)
+            print_char('0');
+    }
+
+    for (auto i = width; 0 < i--;) {
         uint_fast8_t nibble = value >> (i * 4) & 0xf;
-        putchar("0123456789abcdef"[nibble]);
+        print_char("0123456789abcdef"[nibble]);
     }
 }
 
-template <typename T> void print_dec(T value) {
+template <typename T>
+void print_dec(T value, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
+               optional<size_t> precision = nullopt) {
+
+    bool minus = false;
+
     // https://github.com/nuta/operating-system-in-1000-lines/issues/64
     __make_unsigned(T) magnitude = value;
     if (value < 0) {
-        putchar('-');
+        minus = true;
         magnitude = -magnitude;
     }
 
+    size_t width = 1;
     decltype(magnitude) divisor = 1;
-    while (magnitude / divisor > 9)
+    while (magnitude / divisor > 9) {
         divisor *= 10;
+        ++width;
+    }
+
+    size_t padding_spaces = 0, leading_zeros = 0;
+    auto width_with_sign = width + (minus ? 1 : 0);
+    if (precision) {
+        if (!precision.value() and !value)
+            // Special case: if both are zero, don't print any digit
+            divisor = width_with_sign = width = 0;
+        if (width /*without sign*/ < precision.value())
+            leading_zeros = precision.value() - width;
+    } else if (minimum_width and '0' == padding) {
+        if (width_with_sign < minimum_width.value())
+            leading_zeros = minimum_width.value() - width_with_sign;
+    }
+    if (minimum_width and (' ' == padding or precision /* ignore 0 padding -> always use space padding */)) {
+        if (width_with_sign < minimum_width.value())
+            padding_spaces = minimum_width.value() - width_with_sign - leading_zeros;
+    }
+
+    for (auto i = 0uz; i < padding_spaces; ++i)
+        print_char(' ');
+    if (minus)
+        print_char('-');
+    for (auto i = 0uz; i < leading_zeros; ++i)
+        print_char('0');
 
     while (divisor) {
-        putchar('0' + magnitude / divisor);
+        print_char('0' + magnitude / divisor);
         magnitude %= divisor;
         divisor /= 10;
     }
+}
+
+void print_string(const char *s, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
+                  optional<size_t> precision = nullopt) {
+    auto n = strlen(s);
+    if (precision)
+        n = min(precision.value(), n);
+    if (minimum_width and n < minimum_width.value())
+        for (auto i = 0uz; i < (minimum_width.value() - n); ++i)
+            print_char(padding);
+
+    for (auto i = 0uz; i < n; ++i)
+        print_char(s[i]);
 }
 } // namespace
 
@@ -296,42 +395,38 @@ void printf(const char *__restrict__ format, ...) {
             case '%': // Print '%'
                 putchar('%');
                 break;
-            case 's': {
-                const auto *s = va_arg(vargs, const char *);
-                for (auto i = 0uz; s[i] != '\0'; ++i)
-                    putchar(s[i]);
+            case 's':
+                print_string(va_arg(vargs, const char *), putchar);
                 break;
-            }
             case 'd':
-                print_dec(va_arg(vargs, int));
+                print_dec(va_arg(vargs, int), putchar);
                 break;
             case 'x':
-                print_hex(va_arg(vargs, unsigned));
+                print_hex(va_arg(vargs, unsigned), putchar);
                 break;
             case 'p':
                 putchar('0');
                 putchar('x');
                 // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arithmetic,
                 // and use %lx for printing physical addresses for (the last 32-bit of) Sv32 and Sv39.
-                print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)));
+                print_hex(reinterpret_cast<vaddr_t>(va_arg(vargs, void *)), putchar);
                 break;
             case 'l':
                 switch (*++format) {
                 case 'd':
-                    print_dec(va_arg(vargs, long));
+                    print_dec(va_arg(vargs, long), putchar);
                     break;
                 case 'x':
-                    print_hex(va_arg(vargs, unsigned long));
+                    print_hex(va_arg(vargs, unsigned long), putchar);
                     break;
                 case 'l':
                     switch (*++format) {
                     // Don't work on RV32 because 64-bit division
                     // case 'd':
-                    //     print_dec(va_arg(vargs, long long));
+                    //     print_dec(va_arg(vargs, long long), putchar);
                     //     break;
                     case 'x':
-                        print_hex(va_arg(vargs, unsigned long long));
-                        break;
+                        print_hex(va_arg(vargs, unsigned long long), putchar);
                         break;
                     }
                     break;
@@ -352,15 +447,11 @@ end:
 
 // TODO: Implement these for Doom
 int fprintf(FILE *stream, const char *format, ...) {
-    (void) stream;
-    (void) format;
-    return 0;
-}
-
-int sprintf(char *str, const char *format, ...) {
-    (void) str;
-    (void) format;
-    return 0;
+    va_list ap;
+    va_start(ap, format);
+    int res = vfprintf(stream, format, ap);
+    va_end(ap);
+    return res;
 }
 
 int vfprintf(FILE *stream, const char *format, va_list ap) {
@@ -371,19 +462,93 @@ int vfprintf(FILE *stream, const char *format, va_list ap) {
 }
 
 int snprintf(char *str, size_t size, const char *format, ...) {
-    (void) str;
-    (void) size;
-    (void) format;
-    return 0;
+    va_list ap;
+    va_start(ap, format);
+    int res = vsnprintf(str, size, format, ap);
+    va_end(ap);
+    return res;
+}
+
+optional<char> pLiteral(const char *&format, char ch) {
+    if (ch == *format)
+        return { *(format++) };
+    return nullopt;
+}
+
+template <typename T> optional<T> pDecimal(const char *&format) {
+    T i = 0;
+    bool consumed = false;
+    while ('0' <= *format and *format <= '9') {
+        i += *(format++) - '0';
+        i *= 10;
+        consumed = true;
+    }
+    i /= 10; // TODO better way?
+    return consumed ? optional{ i } : nullopt;
 }
 
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
-    (void) str;
-    (void) size;
-    (void) format;
-    (void) ap;
-    return 0;
+    // max size seems to be 80 in doomgeneric
+    --size;
+    size_t would = 0, written = 0;
+
+    auto putchar1 = [&would, &written, str, size](char ch) {
+        if (written != size)
+            str[written++] = ch;
+        ++would;
+    };
+
+    // %i %02i %3i %7i %s %.8s %d %.2d %2.2d %x %02x %p %f %% %c
+    while (*format) {
+        if ('%' == *format) {
+            // The only flag doomgeneric uses is zero padding
+            auto zero_padding{ pLiteral(++format, '0') };
+            auto width{ pDecimal<size_t>(format) };
+            auto dot{ pLiteral(format, '.') };
+            auto precision{ pDecimal<size_t>(format) };
+            if (dot and !precision)
+                precision = { 0 };
+            // doomgeneric doesn't use length modifier
+            switch (*format++) {
+            case 'i':
+            case 'd':
+                print_dec(va_arg(ap, int), putchar1, zero_padding ? zero_padding.value() : ' ', width, precision);
+                break;
+            case 'x':
+                print_hex(va_arg(ap, unsigned), putchar1, zero_padding ? zero_padding.value() : ' ', width, precision);
+                break;
+            case 'p':
+                putchar1('0');
+                putchar1('x');
+                // %p for pointers (typically virtual addresses), so we convert (void *) to vaddr_t for arithmetic,
+                // and use %lx for printing physical addresses for (the last 32-bit of) Sv32 and Sv39.
+                print_hex(reinterpret_cast<vaddr_t>(va_arg(ap, void *)), putchar1,
+                          zero_padding ? zero_padding.value() : ' ', width, precision);
+                break;
+            case 'f':
+                // TODO
+                break;
+            case 'c':
+                putchar1(va_arg(ap, char));
+                break;
+            case 's':
+                print_string(va_arg(ap, const char *), putchar1, zero_padding ? zero_padding.value() : ' ', width,
+                             precision);
+                break;
+            case '%':
+                putchar1('%');
+                break;
+            default:
+            }
+        } else
+            putchar1(*format++);
+    }
+
+    str[written] = '\0';
+    return would;
 }
+
+// %x %o %d %i 79s %99[^\n]
 
 int fscanf(FILE *stream, const char *format, ...) {
     (void) stream;
