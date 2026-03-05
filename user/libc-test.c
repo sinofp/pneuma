@@ -279,6 +279,8 @@ int main(void) {
     // %x hex
     snprintf(buf, sizeof(buf), "%x", 0xa);
     ASSERT(strcmp(buf, "a") == 0, "%x hex");
+    snprintf(buf, sizeof(buf), "%x", 0);
+    ASSERT(strcmp(buf, "0") == 0, "%x 0");
 
     // %02x zero-padded hex
     snprintf(buf, sizeof(buf), "%02x", 0xa);
@@ -328,6 +330,28 @@ int main(void) {
     // . implies zero precision
     snprintf(buf, sizeof(buf), "%5.d", 0);
     ASSERT(strcmp(buf, "     ") == 0, "%5.d on 0");
+
+    // %f default precision is 6
+    snprintf(buf, sizeof(buf), "%f", 59.99);
+    ASSERT(strcmp(buf, "59.990000") == 0, "%f");
+
+    // %f if precision is 0, no decimal-point character appears
+    snprintf(buf, sizeof(buf), "%.f", .1);
+    ASSERT(strcmp(buf, "0") == 0, "%.f");
+
+    // %f can take padding as well
+    snprintf(buf, sizeof(buf), "%020f", 59.99);
+    ASSERT(strcmp(buf, "0000000000059.990000") == 0, "%020f");
+
+    // %f for negative
+    snprintf(buf, sizeof(buf), "%020f", -59.99);
+    ASSERT(strcmp(buf, "-000000000059.990000") == 0, "%020f on negative");
+    snprintf(buf, sizeof(buf), "%20f", -59.99);
+    ASSERT(strcmp(buf, "          -59.990000") == 0, "%20f on negative");
+
+    // %f no period (0 precision)
+    snprintf(buf, sizeof(buf), "%.f", -.1);
+    ASSERT(strcmp(buf, "-0") == 0, "%.f");
 
     printf("=== All snprintf tests passed! ===\n");
 

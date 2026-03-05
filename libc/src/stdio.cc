@@ -1,7 +1,8 @@
 #include "ff.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h> // malloc
+#include <string.h> // strlen
 #include <sys/syscall.h>
 
 // vaddr_t equivalent for user space
@@ -287,29 +288,49 @@ template <typename T> T max(T a, T b) { return a < b ? b : a; }
 
 template <typename T> T min(T a, T b) { return a < b ? a : b; }
 
+template <typename U, typename V> struct pair {
+    U first;
+    V second;
+};
+
+template <typename T> pair<size_t, T> width_divisor(T value, T base = 10) {
+    size_t width = 1;
+    T divisor = 1;
+    for (; base <= value / divisor; ++width, divisor *= base) {
+    }
+    return { width, divisor };
+}
+
+void print_padding(size_t width, bool minus, auto print_char, char padding = ' ',
+                   optional<size_t> minimum_width = nullopt, optional<size_t> int_presicion = nullopt) {
+    size_t spaces = 0, zeros = 0;
+    if (int_presicion and width < int_presicion.value())
+        zeros = int_presicion.value() - width;
+
+    // int_presicion only cares the digits, but width cares the sign
+    width += minus;
+    if (!int_presicion and '0' == padding and minimum_width and width < minimum_width.value())
+        zeros = minimum_width.value() - width;
+
+    width += zeros;
+    if ((' ' == padding or int_presicion /* ignore zero padding -> always space padding */) and minimum_width and
+        width < minimum_width.value())
+        spaces = minimum_width.value() - width;
+
+    while (spaces--)
+        print_char(' ');
+    if (minus)
+        print_char('-');
+    while (zeros--)
+        print_char('0');
+}
+
 template <typename T>
 void print_hex(T value, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
                optional<size_t> precision = nullopt) {
-    size_t width = 0;
-    for (; value >> (width * 4) & 0xf; ++width) {
-    }
+    auto [width, _]{ width_divisor(value, { 16 }) };
 
-    if (minimum_width) {
-        size_t minimum = minimum_width.value();
-        size_t digits = width;
-        if (precision) {
-            digits = max(width, precision.value());
-            padding = ' ';
-        }
-        for (; digits < minimum; --minimum)
-            print_char(padding);
-    }
-
-    if (precision and width < precision.value()) {
-        size_t minimum = precision.value();
-        for (; width < minimum; --minimum)
-            print_char('0');
-    }
+    print_padding(width, false, print_char, padding, minimum_width, precision);
 
     for (auto i = width; 0 < i--;) {
         uint_fast8_t nibble = value >> (i * 4) & 0xf;
@@ -321,50 +342,57 @@ template <typename T>
 void print_dec(T value, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
                optional<size_t> precision = nullopt) {
 
-    bool minus = false;
+    bool minus = value < 0;
 
     // https://github.com/nuta/operating-system-in-1000-lines/issues/64
     __make_unsigned(T) magnitude = value;
-    if (value < 0) {
-        minus = true;
-        magnitude = -magnitude;
-    }
-
-    size_t width = 1;
-    decltype(magnitude) divisor = 1;
-    while (magnitude / divisor > 9) {
-        divisor *= 10;
-        ++width;
-    }
-
-    size_t padding_spaces = 0, leading_zeros = 0;
-    auto width_with_sign = width + (minus ? 1 : 0);
-    if (precision) {
-        if (!precision.value() and !value)
-            // Special case: if both are zero, don't print any digit
-            divisor = width_with_sign = width = 0;
-        if (width /*without sign*/ < precision.value())
-            leading_zeros = precision.value() - width;
-    } else if (minimum_width and '0' == padding) {
-        if (width_with_sign < minimum_width.value())
-            leading_zeros = minimum_width.value() - width_with_sign;
-    }
-    if (minimum_width and (' ' == padding or precision /* ignore 0 padding -> always use space padding */)) {
-        if (width_with_sign < minimum_width.value())
-            padding_spaces = minimum_width.value() - width_with_sign - leading_zeros;
-    }
-
-    for (auto i = 0uz; i < padding_spaces; ++i)
-        print_char(' ');
     if (minus)
-        print_char('-');
-    for (auto i = 0uz; i < leading_zeros; ++i)
-        print_char('0');
+        magnitude = -magnitude;
+
+    auto [width, divisor]{ width_divisor(magnitude) };
+
+    print_padding(width, minus, print_char, padding, minimum_width, precision);
+
+    if (precision and !precision.value() and !value) {
+        // special case: if both are zero, don't print any digit
+        print_char(' ');
+        return;
+    }
 
     while (divisor) {
         print_char('0' + magnitude / divisor);
         magnitude %= divisor;
         divisor /= 10;
+    }
+}
+
+void print_double(double value, auto print_char, char padding = ' ', optional<size_t> minimum_width = nullopt,
+                  optional<size_t> precision = nullopt) {
+    bool minus = value < 0;
+    if (minus)
+        value = -value;
+
+    uintptr_t integer = value;
+    double fractional = value - integer;
+
+    auto [integer_width, integer_divisor]{ width_divisor(integer) };
+
+    size_t fractional_width = precision ? precision.value() : 6;
+
+    auto width = integer_width + (fractional_width ? (1 /* dot */ + fractional_width) : 0);
+    print_padding(width, minus, print_char, padding, minimum_width, nullopt);
+
+    for (; integer_divisor; integer %= integer_divisor, integer_divisor /= 10)
+        print_char('0' + integer / integer_divisor);
+
+    if (fractional_width)
+        print_char('.');
+
+    for (auto i = 0uz; i < fractional_width; ++i) {
+        fractional *= 10;
+        unsigned digit = fractional;
+        fractional -= digit;
+        print_char('0' + digit);
     }
 }
 
@@ -419,18 +447,6 @@ void printf(const char *__restrict__ format, ...) {
                 case 'x':
                     print_hex(va_arg(vargs, unsigned long), putchar);
                     break;
-                case 'l':
-                    switch (*++format) {
-                    // Don't work on RV32 because 64-bit division
-                    // case 'd':
-                    //     print_dec(va_arg(vargs, long long), putchar);
-                    //     break;
-                    case 'x':
-                        print_hex(va_arg(vargs, unsigned long long), putchar);
-                        break;
-                    }
-                    break;
-                default:
                 }
                 break;
             default:
@@ -445,7 +461,6 @@ end:
     va_end(vargs);
 }
 
-// TODO: Implement these for Doom
 int fprintf(FILE *stream, const char *format, ...) {
     va_list ap;
     va_start(ap, format);
@@ -455,9 +470,15 @@ int fprintf(FILE *stream, const char *format, ...) {
 }
 
 int vfprintf(FILE *stream, const char *format, va_list ap) {
-    (void) stream;
-    (void) format;
-    (void) ap;
+    // Get the required length to allocate
+    va_list ap2;
+    va_copy(ap2, ap);
+    auto n = vsnprintf(nullptr, 0, format, ap2);
+
+    auto *s = static_cast<char *>(malloc(n));
+    vsnprintf(s, n, format, ap);
+    fwrite(s, 1, n, stream);
+    free(s);
     return 0;
 }
 
@@ -479,11 +500,10 @@ template <typename T> optional<T> pDecimal(const char *&format) {
     T i = 0;
     bool consumed = false;
     while ('0' <= *format and *format <= '9') {
-        i += *(format++) - '0';
         i *= 10;
+        i += *(format++) - '0';
         consumed = true;
     }
-    i /= 10; // TODO better way?
     return consumed ? optional{ i } : nullopt;
 }
 
@@ -526,10 +546,10 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                           zero_padding ? zero_padding.value() : ' ', width, precision);
                 break;
             case 'f':
-                // TODO
+                print_double(va_arg(ap, double), putchar1, zero_padding ? zero_padding.value() : ' ', width, precision);
                 break;
             case 'c':
-                putchar1(va_arg(ap, char));
+                putchar1(va_arg(ap, int));
                 break;
             case 's':
                 print_string(va_arg(ap, const char *), putchar1, zero_padding ? zero_padding.value() : ' ', width,
