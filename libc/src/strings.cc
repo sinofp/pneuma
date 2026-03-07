@@ -4,7 +4,7 @@
 namespace {
 // should be in ctype.h
 int tolower(int c) {
-    if ('A' <= c and c < 'Z')
+    if ('A' <= c and c <= 'Z')
         return c + 'a' - 'A';
     return c; // \0 returns \0
 }

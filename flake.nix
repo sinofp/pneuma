@@ -398,6 +398,7 @@
 
                 sed -i 's|#include <inttypes.h>|#include <stdint.h>|' doomgeneric/doomtype.h # stdint.h is the file it really wants
                 sed -i 's|#include <unistd.h>||' doomgeneric/i_system.c # isatty is guarded by false #if
+                sed -i 's|#include <assert.h>||' doomgeneric/sha1.c # Not used
                 sed -i 's|#include <sys/types.h>|#include <stdint.h>|' doomgeneric/*.c # stdint.h is the file it really wants
 
                 # Remove platform-specific implementations we don't want
@@ -409,6 +410,7 @@
                 rm -f doomgeneric/gusconf.c      # GUS sound card emulation
                 rm -f doomgeneric/mus2mid.c      # Some kind of MIDI thing
                 rm -f doomgeneric/icon.c
+                rm -f doomgeneric/m_fixed.c      # Cause trouble on RV32
 
                 # Copy our platform layer into the same directory
                 cp ${./user/doomgeneric_rv.c} doomgeneric/

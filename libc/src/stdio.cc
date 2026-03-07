@@ -1,8 +1,9 @@
 #include "ff.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h> // malloc
-#include <string.h> // strlen
+#include <stdlib.h>   // malloc
+#include <string.h>   // strlen
+#include <sys/stat.h> // mkdir
 #include <sys/syscall.h>
 
 // vaddr_t equivalent for user space
@@ -106,7 +107,7 @@ BYTE mode_to_flags(const char *mode) {
 
 // File operations
 
-FILE *fopen(const char *path, const char *mode) {
+FILE *fopen(const char *__restrict__ path, const char *__restrict__ mode) {
     if (nullptr == path or nullptr == mode)
         return NULL;
 
@@ -144,7 +145,7 @@ int fclose(FILE *stream) {
     return (FR_OK == res) ? 0 : EOF;
 }
 
-size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+size_t fread(void *__restrict__ ptr, size_t size, size_t nmemb, FILE *__restrict__ stream) {
     if (nullptr == stream or nullptr == ptr or 0 == size or 0 == nmemb)
         return 0;
 
@@ -155,7 +156,7 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return (FR_OK == res) ? br / size : 0;
 }
 
-size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+size_t fwrite(const void *__restrict__ ptr, size_t size, size_t nmemb, FILE *__restrict__ stream) {
     if (nullptr == stream or nullptr == ptr or 0 == size or 0 == nmemb)
         return 0;
 
@@ -214,27 +215,23 @@ int feof(FILE *stream) {
     return f_eof(fil) ? 1 : 0;
 }
 
-char *fgets(char *s, int size, FILE *stream) {
-    if (nullptr == s or size <= 0 or nullptr == stream)
-        return NULL;
+int remove(const char *path) {
+    auto res = f_unlink(path);
+    // TODO set errno
+    return FR_OK == res ? 0 : -1;
+}
 
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    int i = 0;
-    while (i < size - 1) {
-        unsigned char c;
-        UINT br;
-        if (FR_OK != f_read(fil, &c, 1, &br) or 0 == br)
-            break;
-        s[i++] = static_cast<char>(c);
-        if ('\n' == c)
-            break;
-    }
+int rename(const char *old, const char *_new) {
+    auto res = f_rename(old, _new);
+    // TODO set errno
+    return FR_OK == res ? 0 : -1;
+}
 
-    if (0 == i)
-        return NULL;
-
-    s[i] = '\0';
-    return s;
+// Techinically, it's not part of stdio (it's sys/stat), but I think it fits here
+int mkdir(const char *path, [[maybe_unused]] /* FAT after all */ mode_t mode) {
+    auto res = f_mkdir(path);
+    // TODO set errno
+    return FR_OK == res ? 0 : -1;
 }
 
 int puts(const char *s) {
@@ -245,13 +242,6 @@ int puts(const char *s) {
         putchar(*s++);
     putchar('\n');
     return 0;
-}
-
-void perror(const char *s) {
-    if (nullptr != s and '\0' != *s) {
-        printf("%s: ", s);
-    }
-    printf("error\n");
 }
 
 // printf family
@@ -408,8 +398,65 @@ void print_string(const char *s, auto print_char, char padding = ' ', optional<s
     for (auto i = 0uz; i < n; ++i)
         print_char(s[i]);
 }
+
+// format option parsers
+
+optional<char> parse_literal(const char *__restrict__ &str, char ch) {
+    if (ch == *str)
+        return { *(str++) };
+    return nullopt;
+}
+
+template <typename T> optional<T> parse_number(const char *__restrict__ &str, int base = -1 /* optional<int>? */) {
+    if (!*str)
+        return nullopt;
+
+    bool minus = 0;
+    if ('-' == *str) {
+        minus = true;
+        ++str;
+        // assume there must be a valid digit after minus
+    }
+
+    // Guess the base for scanf %i, and consume the optional prefixes for %x, %o
+    if ((16 == base or -1 == base) and '0' == *str and ('x' == *(str + 1) or 'X' == *(str + 1))) {
+        base = 16;
+        str += 2;
+    } else if (8 == base and '0' == *str) {
+        ++str;
+        if ('\0' == *str)
+            return 0; // The 0 is not the optional prefix, it's the value, return it
+    } else if (-1 == base and '0' == *str and '\0' != *(str + 1)) {
+        base = 8;
+        ++str;
+    } else if (-1 == base)
+        base = 10;
+
+    auto to_digit = [base](char ch) {
+        if ('0' <= ch and ch <= '9')
+            return ch - '0';
+        if (16 == base and 'a' <= ch and ch <= 'f')
+            return 10 + ch - 'a';
+        if (16 == base and 'A' <= ch and ch <= 'F')
+            return 10 + ch - 'A';
+        return -1;
+    };
+
+    bool consumed = false;
+    __make_unsigned(T) magnitude = 0;
+    for (int digit = to_digit(*str); -1 < digit and digit < base; digit = to_digit(*++str)) {
+        magnitude *= base;
+        magnitude += digit;
+        consumed = true;
+    }
+
+    T res = minus ? -magnitude : magnitude;
+    return consumed ? (optional{ res }) : nullopt;
+}
+
 } // namespace
 
+// TODO make a vsnprintf_base that can change the print_char argument
 void printf(const char *__restrict__ format, ...) {
     va_list vargs;
     va_start(vargs, format);
@@ -461,7 +508,7 @@ end:
     va_end(vargs);
 }
 
-int fprintf(FILE *stream, const char *format, ...) {
+int fprintf(FILE *__restrict__ stream, const char *__restrict__ format, ...) {
     va_list ap;
     va_start(ap, format);
     int res = vfprintf(stream, format, ap);
@@ -469,7 +516,7 @@ int fprintf(FILE *stream, const char *format, ...) {
     return res;
 }
 
-int vfprintf(FILE *stream, const char *format, va_list ap) {
+int vfprintf(FILE *__restrict__ stream, const char *__restrict__ format, va_list ap) {
     // Get the required length to allocate
     va_list ap2;
     va_copy(ap2, ap);
@@ -482,7 +529,7 @@ int vfprintf(FILE *stream, const char *format, va_list ap) {
     return 0;
 }
 
-int snprintf(char *str, size_t size, const char *format, ...) {
+int snprintf(char *__restrict__ str, size_t size, const char *__restrict__ format, ...) {
     va_list ap;
     va_start(ap, format);
     int res = vsnprintf(str, size, format, ap);
@@ -490,24 +537,7 @@ int snprintf(char *str, size_t size, const char *format, ...) {
     return res;
 }
 
-optional<char> pLiteral(const char *&format, char ch) {
-    if (ch == *format)
-        return { *(format++) };
-    return nullopt;
-}
-
-template <typename T> optional<T> pDecimal(const char *&format) {
-    T i = 0;
-    bool consumed = false;
-    while ('0' <= *format and *format <= '9') {
-        i *= 10;
-        i += *(format++) - '0';
-        consumed = true;
-    }
-    return consumed ? optional{ i } : nullopt;
-}
-
-int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
+int vsnprintf(char *__restrict__ str, size_t size, const char *__restrict__ format, va_list ap) {
     // max size seems to be 80 in doomgeneric
     --size;
     size_t would = 0, written = 0;
@@ -522,10 +552,10 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     while (*format) {
         if ('%' == *format) {
             // The only flag doomgeneric uses is zero padding
-            auto zero_padding{ pLiteral(++format, '0') };
-            auto width{ pDecimal<size_t>(format) };
-            auto dot{ pLiteral(format, '.') };
-            auto precision{ pDecimal<size_t>(format) };
+            auto zero_padding{ parse_literal(++format, '0') };
+            auto width{ parse_number<size_t>(format, 10) };
+            auto dot{ parse_literal(format, '.') };
+            auto precision{ parse_number<size_t>(format, 10) };
             if (dot and !precision)
                 precision = { 0 };
             // doomgeneric doesn't use length modifier
@@ -568,16 +598,63 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     return would;
 }
 
-// %x %o %d %i 79s %99[^\n]
-
-int fscanf(FILE *stream, const char *format, ...) {
-    (void) stream;
-    (void) format;
-    return 0;
-}
-
 int sscanf(const char *str, const char *format, ...) {
-    (void) str;
-    (void) format;
-    return 0;
+    va_list ap;
+    va_start(ap, format);
+    int assigned = 0;
+
+    auto assign = [&](auto val) {
+        ++format;
+        *va_arg(ap, decltype(val) *) = val;
+        ++assigned;
+    };
+
+    while (*format) {
+        if ('%' == *format) {
+            // doomgeneric only use %x %i %o %d w/o any options
+            switch (*++format) {
+            case 'i': {
+                auto num{ parse_number<int>(str) };
+                if (num) {
+                    assign(num.value());
+                    break;
+                }
+                goto end_sscanf;
+            }
+            case 'd': {
+                auto dec{ parse_number<int>(str, 10) };
+                if (dec) {
+                    assign(dec.value());
+                    break;
+                }
+                goto end_sscanf;
+            }
+            case 'x': {
+                auto hex{ parse_number<unsigned>(str, 16) };
+                if (hex) {
+                    assign(hex.value());
+                    break;
+                }
+                goto end_sscanf;
+            }
+            case 'o': {
+                auto oct{ parse_number<unsigned>(str, 8) };
+                if (oct) {
+                    assign(oct.value());
+                    break;
+                }
+                goto end_sscanf;
+            }
+            }
+        } else if (*str == *format) {
+            // Consume normal text
+            ++str;
+            ++format;
+        } else
+            break;
+    }
+
+end_sscanf:
+    va_end(ap);
+    return assigned;
 }

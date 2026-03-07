@@ -1,7 +1,10 @@
+#include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -99,6 +102,25 @@ int main(void) {
     ASSERT(n == strlen(msg), "fread should return message length");
     ASSERT(0 == strcmp(buf, msg), "Read content should match written content");
 
+    fclose(f);
+
+    // Test mkdir: create directory, write and read a file inside it
+    ASSERT(mkdir("/testdir", 0755) == 0, "mkdir");
+    ASSERT(mkdir("/testdir", 0755) != 0, "mkdir duplicate fails");
+
+    f = fopen("/testdir/inside.txt", "w");
+    ASSERT(f, "fopen inside new dir failed");
+    const char *dir_msg = "inside testdir";
+    n = fwrite(dir_msg, 1, strlen(dir_msg), f);
+    ASSERT(n == strlen(dir_msg), "fwrite inside dir");
+    fclose(f);
+
+    f = fopen("/testdir/inside.txt", "r");
+    ASSERT(f, "fopen inside dir for read failed");
+    memset(buf, 0, sizeof(buf));
+    n = fread(buf, 1, sizeof(buf), f);
+    ASSERT(n == strlen(dir_msg), "fread inside dir");
+    ASSERT(0 == strcmp(buf, dir_msg), "dir file content matches");
     fclose(f);
 
     printf("=== All stdio tests passed! ===\n");
@@ -354,6 +376,117 @@ int main(void) {
     ASSERT(strcmp(buf, "-0") == 0, "%.f");
 
     printf("=== All snprintf tests passed! ===\n");
+
+    printf("\n=== Testing sscanf ===\n");
+    int si; unsigned su;
+
+    // %d: basic positive
+    ASSERT(sscanf("42", "%d", &si) == 1, "sscanf %d assigned");
+    ASSERT(si == 42, "sscanf %d value");
+
+    // %d: negative
+    ASSERT(sscanf("-123", "%d", &si) == 1, "sscanf %d negative assigned");
+    ASSERT(si == -123, "sscanf %d negative value");
+
+    // %d: zero
+    ASSERT(sscanf("0", "%d", &si) == 1, "sscanf %d zero assigned");
+    ASSERT(si == 0, "sscanf %d zero value");
+
+    // %i: decimal (same as %d)
+    ASSERT(sscanf("99", "%i", &si) == 1, "sscanf %i decimal assigned");
+    ASSERT(si == 99, "sscanf %i decimal value");
+
+    // %i: hex via 0x prefix
+    ASSERT(sscanf("0xff", "%i", &si) == 1, "sscanf %i hex assigned");
+    ASSERT(si == 255, "sscanf %i hex value");
+
+    // %i: octal via leading 0
+    ASSERT(sscanf("010", "%i", &si) == 1, "sscanf %i octal assigned");
+    ASSERT(si == 8, "sscanf %i octal value");
+
+    // %d: zero (not the octal prefix)
+    ASSERT(sscanf("0", "%i", &si) == 1, "sscanf %i zero assigned");
+    ASSERT(si == 0, "sscanf %i zero value");
+
+    // %x: lowercase hex digits
+    ASSERT(sscanf("ff", "%x", &su) == 1, "sscanf %x assigned");
+    ASSERT(su == 255, "sscanf %x value");
+
+    // %x: uppercase hex digits
+    ASSERT(sscanf("FF", "%x", &su) == 1, "sscanf %x uppercase assigned");
+    ASSERT(su == 255, "sscanf %x uppercase value");
+
+    // %x: mixed case with 0x prefix
+    ASSERT(sscanf("0x1A", "%x", &su) == 1, "sscanf %x prefix assigned");
+    ASSERT(su == 26, "sscanf %x prefix value");
+
+    // %x: zero
+    ASSERT(sscanf("0", "%x", &su) == 1, "sscanf %x zero assigned");
+    ASSERT(su == 0, "sscanf %x zero value");
+
+    // %o: basic octal
+    ASSERT(sscanf("17", "%o", &su) == 1, "sscanf %o assigned");
+    ASSERT(su == 15, "sscanf %o value");
+
+    // %o: leading zero (still octal, not auto-detect)
+    ASSERT(sscanf("010", "%o", &su) == 1, "sscanf %o leading zero assigned");
+    ASSERT(su == 8, "sscanf %o leading zero value");
+
+    // %o: zero
+    ASSERT(sscanf("0", "%o", &su) == 1, "sscanf %o zero assigned");
+    ASSERT(su == 0, "sscanf %o zero value");
+
+    // multiple conversions: return value is count of assigned items
+    int sa, sb, sc;
+    ASSERT(sscanf("1 2 3", "%d %d %d", &sa, &sb, &sc) == 3, "sscanf three ints assigned");
+    ASSERT(sa == 1 && sb == 2 && sc == 3, "sscanf three ints values");
+
+    // literal text in format
+    ASSERT(sscanf("x=42", "x=%d", &si) == 1, "sscanf literal text assigned");
+    ASSERT(si == 42, "sscanf literal text value");
+
+    // failed match returns 0
+    ASSERT(sscanf("abc", "%d", &si) == 0, "sscanf failed match returns 0");
+
+    // partial match: returns count of successfully assigned before failure
+    ASSERT(sscanf("42 abc", "%d %d", &sa, &sb) == 1, "sscanf partial match");
+    ASSERT(sa == 42, "sscanf partial match value");
+
+    printf("=== All sscanf tests passed! ===\n");
+
+    printf("\n=== Testing ctype/math ===\n");
+
+    // isprint: printable chars (0x20..0x7e)
+    ASSERT(isprint(' '),  "isprint space");
+    ASSERT(isprint('A'),  "isprint letter");
+    ASSERT(isprint('~'),  "isprint tilde");
+    ASSERT(!isprint('\0'), "isprint NUL");
+    ASSERT(!isprint('\n'), "isprint newline");
+    ASSERT(!isprint('\x7f'), "isprint DEL");
+
+    // isspace: ' ' \t \n \r \f \v
+    ASSERT(isspace(' '),  "isspace space");
+    ASSERT(isspace('\t'), "isspace tab");
+    ASSERT(isspace('\n'), "isspace newline");
+    ASSERT(isspace('\r'), "isspace CR");
+    ASSERT(isspace('\f'), "isspace FF");
+    ASSERT(isspace('\v'), "isspace VT");
+    ASSERT(!isspace('A'), "isspace letter");
+    ASSERT(!isspace('0'), "isspace digit");
+
+    // toupper
+    ASSERT(toupper('a') == 'A', "toupper lowercase");
+    ASSERT(toupper('z') == 'Z', "toupper lowercase z");
+    ASSERT(toupper('A') == 'A', "toupper already upper");
+    ASSERT(toupper('0') == '0', "toupper digit unchanged");
+    ASSERT(toupper(' ') == ' ', "toupper space unchanged");
+
+    // fabs
+    ASSERT(fabs(1.5)  == 1.5,  "fabs positive");
+    ASSERT(fabs(-1.5) == 1.5,  "fabs negative");
+    ASSERT(fabs(0.0)  == 0.0,  "fabs zero");
+
+    printf("=== All ctype/math tests passed! ===\n");
 
     return 0;
 }

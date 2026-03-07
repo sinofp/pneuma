@@ -179,19 +179,9 @@ void *realloc(void *ptr, size_t size) {
     return NULL;
 }
 
-char *getenv(const char *name) {
-    // Can only be DOOMWADPATH, DOOMWADDIR, TEMP
-    return "hahaha";
-}
-
-int remove(const char *path) {
-    // TODO syscall
-    return 0;
-}
-
-int rename(const char *old, const char *_new) {
-    // TODO syscall
-    return 0;
+int system(const char *command) {
+    // Only used for Zenity, which we don't have
+    return -1;
 }
 
 [[noreturn]]

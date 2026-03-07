@@ -10,7 +10,6 @@ extern "C" {
 // Basic console I/O
 int putchar(int);
 int getchar();
-void printf(const char *__restrict__, ...);
 int puts(const char *s);
 
 // FILE is opaque (internally FIL*)
@@ -21,22 +20,26 @@ extern FILE *stdout;
 extern FILE *stderr;
 
 // File operations
-FILE *fopen(const char *path, const char *mode);
-int fclose(FILE *stream);
-size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
-size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
-int fseek(FILE *stream, long offset, int whence);
-long ftell(FILE *stream);
-int fflush(FILE *stream);
-int feof(FILE *stream);
+FILE *fopen(const char *__restrict__, const char *__restrict__);
+int fclose(FILE *);
+size_t fread(void *__restrict__, size_t, size_t, FILE *__restrict__);
+size_t fwrite(const void *__restrict__, size_t, size_t, FILE *__restrict__);
+int fseek(FILE *, long, int);
+long ftell(FILE *);
+int fflush(FILE *);
+int feof(FILE *);
 
-// Formatted I/O (stubs for Doom)
-int fprintf(FILE *stream, const char *format, ...);
-int vfprintf(FILE *stream, const char *format, va_list ap);
-int snprintf(char *str, size_t size, const char *format, ...);
-int vsnprintf(char *str, size_t size, const char *format, va_list ap);
-int fscanf(FILE *stream, const char *format, ...);
-int sscanf(const char *str, const char *format, ...);
+int remove(const char *);
+int rename(const char *, const char *);
+
+// Formatted I/O
+void printf(const char *__restrict__, ...);
+int fprintf(FILE *__restrict__, const char *__restrict__, ...);
+int snprintf(char *__restrict__, size_t, const char *__restrict__, ...);
+int vfprintf(FILE *__restrict__, const char *__restrict__, va_list);
+int vsnprintf(char *__restrict__, size_t, const char *__restrict__, va_list);
+
+int sscanf(const char *__restrict__, const char *__restrict__, ...);
 
 // Seek origins
 #ifndef SEEK_SET

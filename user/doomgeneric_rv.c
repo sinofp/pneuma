@@ -2,7 +2,21 @@
 // Stub implementations - no display or input yet
 
 #include "doomgeneric.h"
+#include "m_fixed.h"
+#include <limits.h>
+#include <stdlib.h>
 #include <sys/misc.h>
+
+// Use double to fake Doom 16.16 fixed-point to replace 64-bit int divison on RV32
+fixed_t FixedMul(fixed_t a, fixed_t b) {
+    return (fixed_t)((double)a * b / FRACUNIT);
+}
+
+fixed_t FixedDiv(fixed_t a, fixed_t b) {
+    if ((abs(a) >> 14) >= abs(b))
+        return (a ^ b) < 0 ? INT_MIN : INT_MAX;
+    return (fixed_t)((double)a / b * FRACUNIT);
+}
 
 // DG_ScreenBuffer is defined and allocated in doomgeneric.c
 

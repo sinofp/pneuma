@@ -20,12 +20,6 @@ void *malloc(size_t);
 
 void *realloc(void *, size_t);
 
-char *getenv(const char *);
-
-int remove(const char *);
-
-int rename(const char *, const char *);
-
 int system(const char *);
 
 [[noreturn]]
