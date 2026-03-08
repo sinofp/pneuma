@@ -1,5 +1,5 @@
+#include "dev/virtio-blk.h"
 #include "dev/mmio.h"
-#include "dev/virtio.h"
 #include "fdt/fdt.h"
 #include "mem/mem.h"
 #include "proc/proc.h"
@@ -8,52 +8,75 @@
 #include "trap/plic.h"
 
 namespace virtio::blk {
-virtq *request_vq;
-req_t *req;
 paddr_t vq_paddr;
-paddr_t req_paddr;
 uint64_t capacity;
-bool use_shifted_pfn = false;
 paddr_t base = fdt::uninitialised;
-proc::process *waiting_proc = nullptr;
+uint32_t irq = fdt::uninitialised;
 } // namespace virtio::blk
 
 namespace {
 
-void virtio_reg_fetch_and_or32(size_t offset, uint32_t value) {
-    auto addr = virtio::blk::base + offset;
-    mmio::write<uint32_t>(addr, mmio::read<uint32_t>(addr) | value);
-}
+constexpr uint32_t DEVICE_ID = 2;
+constexpr uint32_t T_IN = 0;
+constexpr uint32_t T_OUT = 1;
+constexpr size_t SECTOR_SIZE = 512;
+
+struct [[gnu::packed]] req_t {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t sector;
+    uint8_t data[512];
+    uint8_t status;
+};
+
+virtio::virtq *requestq = nullptr;
+req_t *req = nullptr;
+paddr_t req_paddr = 0;
+bool use_shifted_pfn = false;
+proc::process *waiting_proc = nullptr;
 
 } // namespace
 
 namespace virtio {
 
-virtq *virtq_init(uint32_t index) {
-    if (!blk::vq_paddr)
-        PANIC("virtio: virtq buffers not allocated in mem::init");
+virtq *virtq_init(paddr_t mmio_base, paddr_t vq_buf, bool shifted_pfn, uint32_t index) {
+    if (!vq_buf)
+        PANIC("virtio: virtq buffer not allocated");
 
-    blk::request_vq = reinterpret_cast<virtq *>(blk::vq_paddr);
-    memset(blk::request_vq, 0, sizeof(virtq));
-
-    auto virtq_paddr = blk::vq_paddr;
-    auto *vq = blk::request_vq;
+    auto *vq = reinterpret_cast<virtq *>(vq_buf);
+    memset(vq, 0, sizeof(virtq));
     vq->queue_index = index;
     vq->used_index = reinterpret_cast<uint16_t *volatile>(&vq->used.index);
 
     // 1. Select the queue writing its index (first queue is 0) to QueueSel.
-    mmio::write<uint32_t>(blk::base, REG_QUEUE_SEL, index);
+    mmio::write<uint32_t>(mmio_base, REG_QUEUE_SEL, index);
     // 5. Notify the device about the queue size by writing the size to QueueNum.
-    mmio::write<uint32_t>(blk::base, REG_QUEUE_NUM, VIRTQ_ENTRY_NUM);
+    mmio::write<uint32_t>(mmio_base, REG_QUEUE_NUM, ENTRY_NUM);
     // 6. Notify the device about the used alignment by writing its value in bytes to QueueAlign.
-    mmio::write<uint32_t>(blk::base, REG_QUEUE_ALIGN, PAGE_SIZE);
+    mmio::write<uint32_t>(mmio_base, REG_QUEUE_ALIGN, mem::PAGE_SIZE);
     // 7. Write the physical number of the first page of the queue to the QueuePFN register.
     // QEMU interprets this differently depending on whether U-Boot was used:
     // - Direct boot: expects raw physical address
     // - U-Boot boot: expects page frame number (paddr >> 12)
     // TODO find out why the behaviour is different and unify it
-    auto queue_pfn = blk::use_shifted_pfn ? (virtq_paddr >> 12) : virtq_paddr;
-    mmio::write<uint32_t>(blk::base, REG_QUEUE_PFN, queue_pfn);
+    auto queue_pfn = shifted_pfn ? (vq_buf >> 12) : vq_buf;
+    mmio::write<uint32_t>(mmio_base, REG_QUEUE_PFN, queue_pfn);
+    return vq;
+}
+
+virtq *device_init(paddr_t mmio_base, paddr_t vq_buf, bool shifted_pfn, uint32_t queue_index) {
+    // 1. Reset the device.
+    mmio::write<uint32_t>(mmio_base, REG_DEVICE_STATUS, 0);
+    // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
+    mmio::fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_ACK);
+    // 3. Set the DRIVER status bit.
+    mmio::fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER);
+    // 5. Set the FEATURES_OK status bit.
+    mmio::fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_FEAT_OK);
+    // 7. Perform device-specific setup, including discovery of virtqueues for the device.
+    auto *vq = virtq_init(mmio_base, vq_buf, shifted_pfn, queue_index);
+    // 8. Set the DRIVER_OK status bit.
+    mmio::fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER_OK);
     return vq;
 }
 
@@ -75,7 +98,7 @@ void init() {
             continue;
         if (mmio::read<uint32_t>(mmio_base, REG_VERSION) != 1)
             continue;
-        if (mmio::read<uint32_t>(mmio_base, REG_DEVICE_ID) != DEVICE_BLK)
+        if (mmio::read<uint32_t>(mmio_base, REG_DEVICE_ID) != DEVICE_ID)
             continue;
 
         ++blk_device_count;
@@ -106,54 +129,35 @@ void init() {
     use_shifted_pfn = (blk_device_count >= 2);
 
     base = selected_base;
-    plic::VIRTIO_BLK_IRQ = selected_irq;
-    plic::enable_irq(plic::VIRTIO_BLK_IRQ);
+    irq = selected_irq;
+    plic::enable_irq(irq);
 
     printf("virtio-blk: Selected device at MMIO=0x%lx, IRQ=%d, capacity=%ld bytes (blk_devices=%ld)\n",
-           static_cast<unsigned long>(base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
-           static_cast<long>(biggest_capacity), static_cast<long>(blk_device_count));
+           static_cast<unsigned long>(base), static_cast<int>(irq), static_cast<long>(biggest_capacity),
+           static_cast<long>(blk_device_count));
 
-    // Now initialize the selected device
-    if (mmio::read<uint32_t>(base, REG_MAGIC) != 0x74726976)
-        PANIC("virtio: invalid magic value");
-    if (mmio::read<uint32_t>(base, REG_VERSION) != 1)
-        PANIC("virtio: invalid version");
-    if (mmio::read<uint32_t>(base, REG_DEVICE_ID) != DEVICE_BLK)
-        PANIC("virtio: invalid device id");
-
-    // 1. Reset the device.
-    mmio::write<uint32_t>(base, REG_DEVICE_STATUS, 0);
-    // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-    virtio_reg_fetch_and_or32(REG_DEVICE_STATUS, STATUS_ACK);
-    // 3. Set the DRIVER status bit.
-    virtio_reg_fetch_and_or32(REG_DEVICE_STATUS, STATUS_DRIVER);
-    // 5. Set the FEATURES_OK status bit.
-    virtio_reg_fetch_and_or32(REG_DEVICE_STATUS, STATUS_FEAT_OK);
-    // 7. Perform device-specific setup, including discovery of virtqueues for the device
-    request_vq = virtq_init(0);
-    // 8. Set the DRIVER_OK status bit.
-    virtio_reg_fetch_and_or32(REG_DEVICE_STATUS, STATUS_DRIVER_OK);
+    requestq = device_init(base, vq_paddr, use_shifted_pfn, 0);
 
     // Get the disk capacity.
     capacity = mmio::read<uint64_t>(base, REG_DEVICE_CONFIG + 0) * SECTOR_SIZE;
     printf("virtio-blk: capacity is %ld bytes\n", static_cast<unsigned long>(capacity));
 
     // Allocate a region to store requests to the device.
-    static_assert(sizeof(req_t) <= PAGE_SIZE, "blk_req bigger than a page frame");
+    static_assert(sizeof(req_t) <= mem::PAGE_SIZE, "blk_req bigger than a page frame");
     req_paddr = mem::alloc_frame();
     req = reinterpret_cast<req_t *>(req_paddr);
 
     // Disable interrupt suppression in the virtqueue
-    request_vq->avail.flags &= ~VIRTQ_AVAIL_F_NO_INTERRUPT;
+    requestq->avail.flags &= ~AVAIL_F_NO_INTERRUPT;
 }
 } // namespace blk
 
 // Notifies the device that there is a new request. `desc_index` is the index
 // of the head descriptor of the new request.
-void virtq_kick(virtq *vq, uint16_t desc_index) {
+void virtq_kick(paddr_t mmio_base, virtq *vq, uint16_t desc_index) {
     // virtio spec: '2. The driver places the index of the head of the descriptor chain into the next ring entry of the
     // available ring.'
-    vq->avail.ring[vq->avail.index % VIRTQ_ENTRY_NUM] = desc_index;
+    vq->avail.ring[vq->avail.index % ENTRY_NUM] = desc_index;
 
     // virtio spec: '4. The driver performs a suitable memory barrier to ensure the device sees the updated descriptor
     // table and available ring before the next step.'
@@ -169,7 +173,7 @@ void virtq_kick(virtq *vq, uint16_t desc_index) {
 
     // virtio spec: '7. The driver sends an available buffer notification to the device if such notifications are not
     // suppressed.'
-    mmio::write<uint32_t>(blk::base, REG_QUEUE_NOTIFY, vq->queue_index);
+    mmio::write<uint32_t>(mmio_base, REG_QUEUE_NOTIFY, vq->queue_index);
 
     ++vq->last_used_index;
 }
@@ -195,25 +199,25 @@ void read_write(void *buf, uint64_t sector, int is_write) {
         memcpy(req->data, buf, SECTOR_SIZE);
 
     // Construct the virtqueue descriptors chain
-    auto *vq = request_vq;
+    auto *vq = requestq;
     vq->descs[0].addr = req_paddr;
     vq->descs[0].len = sizeof(uint32_t) * 2 + sizeof(uint64_t);
-    vq->descs[0].flags = VIRTQ_DESC_F_NEXT;
+    vq->descs[0].flags = DESC_F_NEXT;
     vq->descs[0].next = 1;
 
     vq->descs[1].addr = req_paddr + offsetof(req_t, data);
     vq->descs[1].len = SECTOR_SIZE;
-    vq->descs[1].flags = VIRTQ_DESC_F_NEXT | (is_write ? 0 : VIRTQ_DESC_F_WRITE);
+    vq->descs[1].flags = DESC_F_NEXT | (is_write ? 0 : DESC_F_WRITE);
     vq->descs[1].next = 2;
 
     vq->descs[2].addr = req_paddr + offsetof(req_t, status);
     vq->descs[2].len = sizeof(uint8_t);
-    vq->descs[2].flags = VIRTQ_DESC_F_WRITE;
+    vq->descs[2].flags = DESC_F_WRITE;
 
     waiting_proc = proc::current;
     waiting_proc->state = proc::state_t::SUSPENDED;
     // Notify the device that there is a new request.
-    virtq_kick(vq, 0);
+    virtq_kick(base, vq, 0);
     // The interrupt might also fire here, triggering handle_io_completion before entering reschedule.
     // It's fine because we allow switching to itself in reschedule specifically for this case.
     proc::reschedule();

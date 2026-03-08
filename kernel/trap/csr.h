@@ -167,9 +167,9 @@ private:
 
 public:
     // Construct from a page table pointer
-    explicit constexpr satp(pt_t &page_table)
+    explicit constexpr satp(mem::pt_t &page_table)
         // TODO PPN class with PTE class?
-        : value((static_cast<V>(page_table) / PAGE_SIZE) | mode()) {}
+        : value((static_cast<V>(page_table) / mem::PAGE_SIZE) | mode()) {}
 
     // Write to the CSR
     inline void write() const {

@@ -5,8 +5,6 @@
 
 namespace plic {
 
-extern uint32_t VIRTIO_BLK_IRQ;
-
 constexpr size_t quantity = 1;
 static_assert(quantity <= 132, "U74 only has 1 to 132 PLIC sources");
 

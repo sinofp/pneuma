@@ -1,6 +1,6 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
-#include "dev/virtio.h"
+#include "dev/virtio-blk.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
@@ -265,7 +265,7 @@ extern "C" void handle_trap(trap::frame *f) {
     case SExternalIntr: {
         // External interrupt from PLIC
         if (auto irq = plic::claim(0)) {
-            if (irq == plic::VIRTIO_BLK_IRQ)
+            if (irq == virtio::blk::irq)
                 virtio::blk::handle_io_completion();
             else
                 printf("Unexpected IRQ: %d\n", irq);

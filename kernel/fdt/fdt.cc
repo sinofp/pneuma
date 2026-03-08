@@ -1,5 +1,4 @@
 #include "fdt/fdt.h"
-#include "dev/virtio.h"
 #include "lib/common.h"
 #include "lib/span.h"
 #include "lib/symbols.h"
@@ -105,17 +104,14 @@ constexpr size_t max_depth = 16;
 
 using fdt::uninitialised;
 
-// virtio::blk::base is now defined in dev/virtio-blk.cc
-
 namespace fdt {
 virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
 size_t virtio_device_count = 0;
 } // namespace fdt
 
 namespace plic {
-uint32_t VIRTIO_BLK_IRQ = uninitialised; // 1;
-paddr_t start_addr = uninitialised;      // 0x0c000000;
-paddr_t end_addr = uninitialised;        // 0x00600000;
+paddr_t start_addr = uninitialised; // 0x0c000000;
+paddr_t end_addr = uninitialised;   // 0x00600000;
 } // namespace plic
 
 paddr_t free_ram_end;
@@ -192,13 +188,6 @@ void init(const header *fdt_ptr) {
                     virtio_devices[virtio_device_count].mmio_base = static_cast<paddr_t>(ctx.reg_addr);
                     virtio_devices[virtio_device_count].irq = ctx.irq;
                     virtio_device_count++;
-                }
-                // For backward compatibility, keep the first one
-                if (!virtio_found or ctx.reg_addr < virtio_first) {
-                    virtio_found = true;
-                    virtio_first = ctx.reg_addr;
-                    virtio::blk::base = static_cast<paddr_t>(ctx.reg_addr);
-                    plic::VIRTIO_BLK_IRQ = ctx.irq;
                 }
             }
             if (ctx.is_plic and ctx.reg_set) {

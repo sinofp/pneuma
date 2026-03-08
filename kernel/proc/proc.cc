@@ -1,5 +1,7 @@
 #include "proc/proc.h"
-#include "dev/virtio.h"
+#include "dev/virtio-blk.h"
+#include "dev/virtio-gpu.h"
+#include "fdt/fdt.h"
 #include "lib/debug.h"
 #include "mem/mem.h"
 #include "proc/qtab.h"
@@ -78,37 +80,42 @@ process *create(span<const uint8_t> image) {
     // *ctx = {};
     ctx->ra = reinterpret_cast<xlen_t>(user_entry);
 
-    using enum pte_t::flag;
+    using enum mem::pte_t::flag;
 
     // Identical mapping for kernel pages, prepared for user's syscalls.
     // Map everything from __kernel_base to __free_ram_end.
     // This approach ensures that the kernel can always access both statically allocated areas (like .text), and
     // dynamically allocated areas managed by mem::alloc_frame
-    pt_t page_table{ mem::alloc_frame() };
+    mem::pt_t page_table{ mem::alloc_frame() };
     for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < static_cast<vaddr_t>(free_ram_end);
-         kaddr += PAGE_SIZE)
+         kaddr += mem::PAGE_SIZE)
         mem::map_page(page_table, kaddr, kaddr, R | W | X);
 
-    // Map virtio-block MMIO
-    mem::map_page(page_table, virtio::blk::base, virtio::blk::base, R | W);
+    // All virtio-mmio have 0x00001000 size, so it's sufficient to map only one page to access their registers
+    // Map virtio-block MMIO, skip for idle proc because it is created before blk::init()
+    if (fdt::uninitialised != virtio::blk::base)
+        mem::map_page(page_table, virtio::blk::base, virtio::blk::base, R | W);
+    // We might not even have GPU
+    if (fdt::uninitialised != virtio::gpu::base)
+        mem::map_page(page_table, virtio::gpu::base, virtio::gpu::base, R | W);
 
     // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
-    for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += PAGE_SIZE)
+    for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += mem::PAGE_SIZE)
         mem::map_page(page_table, plic_addr, plic_addr, R | W);
 
     // Map user image pages.
-    for (auto offset = 0uz; offset < image.size(); offset += PAGE_SIZE) {
+    for (auto offset = 0uz; offset < image.size(); offset += mem::PAGE_SIZE) {
         paddr_t page = mem::alloc_frame();
 
         // Fill and map the page.
-        auto chunk = image.subspan(offset, min(PAGE_SIZE, image.size() - offset));
+        auto chunk = image.subspan(offset, min(mem::PAGE_SIZE, image.size() - offset));
         memcpy((void *) page, chunk.data(), chunk.size());
         mem::map_page(page_table, USER_BASE + offset, page, U | R | W | X);
     }
 
     // Map user heap pages (hard coded 8MB for now)
-    vaddr_t heap_base = align_up(USER_BASE + image.size(), PAGE_SIZE);
-    for (auto offset = 0uz; offset < 8 * 1024 * 1024; offset += PAGE_SIZE)
+    vaddr_t heap_base = align_up(USER_BASE + image.size(), mem::PAGE_SIZE);
+    for (auto offset = 0uz; offset < 8 * 1024 * 1024; offset += mem::PAGE_SIZE)
         mem::map_page(page_table, heap_base + offset, mem::alloc_frame(), U | R | W | X);
 
     // Initialize fields.

@@ -11,4 +11,10 @@ template <typename T> inline auto read(paddr_t base, size_t offset) { return rea
 template <typename T> inline void write(paddr_t addr, T data) { *reinterpret_cast<volatile T *>(addr) = data; }
 
 template <typename T> inline void write(paddr_t base, size_t offset, T data) { return write(base + offset, data); }
+
+template <typename T> inline void fetch_and_or(paddr_t base, size_t offset, T data) {
+    auto addr = base + offset;
+    write<T>(addr, read<T>(addr) | data);
+}
+
 } // namespace mmio

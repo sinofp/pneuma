@@ -1,8 +1,10 @@
 #include "mem/mem.h"
-#include "dev/virtio.h"
+#include "dev/virtio-blk.h"
+#include "dev/virtio-gpu.h"
 #include "lib/span.h"
 
 namespace {
+using mem::PAGE_SIZE;
 // Everything [bump_paddr, free_ram_end) will be managed by free stack
 auto bump_paddr = reinterpret_cast<paddr_t>(__free_ram);
 
@@ -67,7 +69,9 @@ void init() {
     // The virtq requiers more than one contiguous physical pages,
     // while our alloc_frame + map_page is designed to allocate contiguous virtual pages.
     // To forbid the usage of alloc_pages after we initilise the free stack, we allocate the virtq here.
-    virtio::blk::vq_paddr = alloc_pages(align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE);
+    constexpr auto virtq_pages = align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE;
+    virtio::blk::vq_paddr = alloc_pages(virtq_pages);
+    virtio::gpu::vq_paddr = alloc_pages(virtq_pages);
 
     auto base = bump_paddr;
     auto total_bytes = free_ram_end - base;
@@ -140,10 +144,38 @@ void map_page(pt_t &root_table, vaddr_t vaddr, paddr_t paddr, pte_t::flag flags)
             table[offset] = pte_t::make_nonleaf(alloc_frame());
 
         pt_t next_table{ table[offset] };
-        self(next_table, level - 1);
+        self(next_table, --level);
     };
 
     map_level(root_table, PAGE_LEVELS - 1);
+}
+
+paddr_t to_paddr(pt_t &root_table, vaddr_t vaddr) {
+    size_t vpn_arr[PAGE_LEVELS];
+    if constexpr (__riscv_xlen == 32) {
+        vpn_arr[0] = vpn<0>(vaddr);
+        vpn_arr[1] = vpn<1>(vaddr);
+    } else {
+        vpn_arr[0] = vpn<0>(vaddr);
+        vpn_arr[1] = vpn<1>(vaddr);
+        vpn_arr[2] = vpn<2>(vaddr);
+    }
+
+    auto get_level = [&](this auto &&self, pt_t &table, int level) -> pte_t {
+        auto offset = vpn_arr[level];
+
+        if (!level)
+            return table[offset];
+
+        if (!table[offset].is_valid())
+            PANIC("Encountered invalid PTE when converting virtual address to physical address");
+
+        pt_t next_table{ table[offset] };
+        return self(next_table, --level);
+    };
+
+    auto leaf_pte = get_level(root_table, PAGE_LEVELS - 1);
+    return leaf_pte.paddr() | (vaddr & (PAGE_SIZE - 1));
 }
 
 void destroy_page_table(pt_t &root_table) {

@@ -1,5 +1,6 @@
 #include "dev/sbi.h"
-#include "dev/virtio.h"
+#include "dev/virtio-blk.h"
+#include "dev/virtio-gpu.h"
 #include "fdt/fdt.h"
 #include "lib/symbols.h"
 #include "mem/mem.h"
@@ -11,18 +12,16 @@
 extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     memset(__bss, 0, __bss_end - __bss);
     fdt::init(fdt_ptr);
-    printf("\n\ndtb:\n  ptr=%p, virtio_base=0x%lx, virtio_irq=%d, plic_base=0x%lx, __free_ram=%p, free_ram_end=0x%lx\n",
-           fdt_ptr, static_cast<unsigned long>(virtio::blk::base), static_cast<int>(plic::VIRTIO_BLK_IRQ),
+    printf("dtb:\n  ptr=%p, plic_base=0x%lx, __free_ram=%p, free_ram_end=0x%lx\n", fdt_ptr,
            static_cast<unsigned long>(plic::start_addr), reinterpret_cast<paddr_t>(__free_ram), free_ram_end);
+    for (size_t i = 0; i < fdt::virtio_device_count; i++)
+        printf("  virtio device %d: base=0x%lx, irq=%d\n", i, fdt::virtio_devices[i].mmio_base,
+               fdt::virtio_devices[i].irq);
 
     queue::init();
     trap::init();
 
     mem::init();
-
-    printf("hello %s\n", "world!");
-    // %lx should be able to output 0x12345678'ffffffff on RV64 (LP64)
-    printf("1 + 2 = %d, 0x%lx, 0x%lx\n", 1 + 2, 0x1234abcd, 0x12345678);
 
     proc::idle = proc::create({ nullptr, 0 });
     // Set the idle process running manually, so it can be saved to readyq in reschedule
@@ -35,6 +34,20 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     // Therefore it must be placed after idle_proc = create_process, otherwise we'll have
     // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
     virtio::blk::init();
+    // Idle was created before blk::init() set base, so its page table lacks the MMIO mapping.
+    // Add it now so interrupt handlers can access virtio MMIO while idle is current.
+    mem::map_page(proc::idle->page_table, virtio::blk::base, virtio::blk::base, mem::pte_t::flag::R | mem::pte_t::flag::W);
+
+    virtio::gpu::init();
+    if (fdt::uninitialised != virtio::gpu::base) {
+        mem::map_page(proc::idle->page_table, virtio::gpu::base, virtio::gpu::base, mem::pte_t::flag::R | mem::pte_t::flag::W);
+
+        static uint32_t fb[320 * 200];
+        for (auto &px : fb)
+            px = 0xFF0000FFu; // BGRA: blue
+        virtio::gpu::attach(reinterpret_cast<vaddr_t>(fb));
+        virtio::gpu::flush();
+    }
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 

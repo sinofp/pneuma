@@ -3,8 +3,12 @@
 #include "lib/common.h"
 #include "lib/span.h"
 
+namespace mem {
+
 // The same for both Sv32 and Sv39
 constexpr size_t PAGE_SIZE = 4096;
+constexpr size_t PAGE_SHIFT = 12;
+constexpr size_t PTE_FLAG_BITS = 10;
 
 // Number of page table levels: Sv32 has 2 levels, Sv39 has 3 levels
 constexpr unsigned PAGE_LEVELS = __riscv_xlen == 32 ? 2 : 3;
@@ -12,7 +16,7 @@ constexpr unsigned PAGE_LEVELS = __riscv_xlen == 32 ? 2 : 3;
 class pte_t {
     xlen_t raw = 0;
 
-    constexpr auto ppn() const { return raw >> 10; }
+    constexpr auto ppn() const { return raw >> PTE_FLAG_BITS; }
 
 public:
     enum class flag : xlen_t {
@@ -45,17 +49,17 @@ public:
     constexpr paddr_t paddr() const {
         if constexpr (__riscv_xlen == 32)
             return static_cast<paddr_t>(ppn()) * PAGE_SIZE;
-        // Ignore reserved [63:54], keep [53:10]
+        // Ignore reserved [63:54], keep [53:PTE_FLAG_BITS]
         return static_cast<paddr_t>(ppn() & 0xfff'ffff'ffffull) * PAGE_SIZE;
     }
 
     // Used to be named make_table, but it doesn't return a pt_t, so make_nonleaf
     static constexpr auto make_nonleaf(paddr_t paddr) {
-        return pte_t{ (paddr / PAGE_SIZE) << 10 | static_cast<xlen_t>(flag::V) };
+        return pte_t{ (paddr / PAGE_SIZE) << PTE_FLAG_BITS | static_cast<xlen_t>(flag::V) };
     }
 
     static constexpr auto make_leaf(paddr_t paddr, flag flags) {
-        return pte_t{ (paddr / PAGE_SIZE) << 10 | static_cast<xlen_t>(flags | flag::V) };
+        return pte_t{ (paddr / PAGE_SIZE) << PTE_FLAG_BITS | static_cast<xlen_t>(flags | flag::V) };
     }
 };
 
@@ -95,12 +99,13 @@ template <unsigned L> constexpr xlen_t vpn(vaddr_t vaddr) {
     if constexpr (__riscv_xlen == 32) {
         if constexpr (L == 1)
             return vaddr >> 22;       // [31:22]
-        return (vaddr >> 12) & 0x3ff; // [21:12]
+        return (vaddr >> PAGE_SHIFT) & 0x3ff; // [21:PAGE_SHIFT]
     } else {
         if constexpr (L == 2)
             return (vaddr >> 30) & 0x1ff; // Ignore sign extension [63:39], keep [38:30]
         if constexpr (L == 1)
             return (vaddr >> 21) & 0x1ff; // [29:21]
-        return (vaddr >> 12) & 0x1ff;     // [20:12]
+        return (vaddr >> PAGE_SHIFT) & 0x1ff;     // [20:PAGE_SHIFT]
     }
 }
+}// namespace mem
