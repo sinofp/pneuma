@@ -108,6 +108,7 @@ BYTE mode_to_flags(const char *mode) {
 // File operations
 
 FILE *fopen(const char *__restrict__ path, const char *__restrict__ mode) {
+    printf("fopen: %s\n", path);
     if (nullptr == path or nullptr == mode)
         return NULL;
 
@@ -522,8 +523,10 @@ int vfprintf(FILE *__restrict__ stream, const char *__restrict__ format, va_list
     va_copy(ap2, ap);
     auto n = vsnprintf(nullptr, 0, format, ap2);
 
-    auto *s = static_cast<char *>(malloc(n));
-    vsnprintf(s, n, format, ap);
+    auto *s = static_cast<char *>(malloc(n + 1));
+    if (nullptr == s)
+        return -1;
+    vsnprintf(s, n + 1, format, ap);
     fwrite(s, 1, n, stream);
     free(s);
     return 0;
@@ -539,11 +542,11 @@ int snprintf(char *__restrict__ str, size_t size, const char *__restrict__ forma
 
 int vsnprintf(char *__restrict__ str, size_t size, const char *__restrict__ format, va_list ap) {
     // max size seems to be 80 in doomgeneric
-    --size;
+    size_t limit = size > 0 ? size - 1 : 0;
     size_t would = 0, written = 0;
 
-    auto putchar1 = [&would, &written, str, size](char ch) {
-        if (written != size)
+    auto putchar1 = [&would, &written, str, size, limit](char ch) {
+        if (str and written != limit)
             str[written++] = ch;
         ++would;
     };
@@ -594,7 +597,8 @@ int vsnprintf(char *__restrict__ str, size_t size, const char *__restrict__ form
             putchar1(*format++);
     }
 
-    str[written] = '\0';
+    if (str)
+        str[written] = '\0';
     return would;
 }
 

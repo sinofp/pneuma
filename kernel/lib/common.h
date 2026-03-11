@@ -40,6 +40,9 @@ constexpr unsigned long SYS_DISK_READ = 4;
 constexpr unsigned long SYS_DISK_WRITE = 5;
 constexpr unsigned long SYS_SLEEP = 6;
 constexpr unsigned long SYS_DISK_IOCTL = 7;
+constexpr unsigned long SYS_GET_TICKS = 8;
+constexpr unsigned long SYS_GPU_ATTACH = 9;
+constexpr unsigned long SYS_GPU_FLUSH = 10;
 
 // DISK_IOCTL commands
 constexpr unsigned long DISK_IOCTL_GET_SECTOR_COUNT = 1;

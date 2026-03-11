@@ -32,7 +32,7 @@ struct process {
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
                 // be a vaddr_t *.
     uint8_t stack[1024 * 1024]; // Kernel stack
-    mem::pt_t page_table;            // Page table for this process
+    mem::pt_t page_table;       // Page table for this process
 };
 
 // The base virtual address of an application image. This needs to match the

@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/misc.h>
+#include <sys/syscall.h>
 
 // Use double to fake Doom 16.16 fixed-point to replace 64-bit int divison on RV32
 fixed_t FixedMul(fixed_t a, fixed_t b) {
@@ -21,29 +22,34 @@ fixed_t FixedDiv(fixed_t a, fixed_t b) {
 // DG_ScreenBuffer is defined and allocated in doomgeneric.c
 
 void DG_Init(void) {
-    // Platform-specific initialization (none needed for now)
+    // puts("DG_Init");
+    syscall(SYS_GPU_ATTACH, (unsigned long)DG_ScreenBuffer, 0, 0);
 }
 
 void DG_DrawFrame(void) {
-    // Stub: no display yet
+    // puts("DG_DrawFrame");
+    syscall(SYS_GPU_FLUSH, 0, 0, 0);
 }
 
 void DG_SleepMs(uint32_t ms) {
+    // puts("DG_SleepMs");
     sleep_ms(ms);
 }
 
 uint32_t DG_GetTicksMs(void) {
-    // TODO: implement real tick counter via syscall
-    return 0;
+    // puts("DG_GetTicksMs");
+    return syscall(SYS_GET_TICKS, 0, 0, 0);
 }
 
 int DG_GetKey(int *pressed, unsigned char *key) {
+    // puts("DG_GetKey");
     (void)pressed;
     (void)key;
     return 0; // No input
 }
 
 void DG_SetWindowTitle(const char *title) {
+    puts("DG_WindowTitle");
     (void)title;
     // No-op
 }
@@ -51,7 +57,7 @@ void DG_SetWindowTitle(const char *title) {
 // Entry point
 void doomgeneric_Create(int argc, char **argv);
 
-int main(int argc, char **argv) {
-    doomgeneric_Create(argc, argv);
+int main() {
+    doomgeneric_Create(0, NULL);
     return 0;
 }

@@ -33,6 +33,8 @@ virtio::virtq *requestq = nullptr;
 req_t *req = nullptr;
 paddr_t req_paddr = 0;
 bool use_shifted_pfn = false;
+
+// TODO make it a queue to serve multiple processes
 proc::process *waiting_proc = nullptr;
 
 } // namespace

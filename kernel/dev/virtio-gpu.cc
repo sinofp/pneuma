@@ -105,6 +105,19 @@ constexpr le32 DEVICE_ID = 16;
 constexpr le32 FORMAT_B8G8R8A8_UNORM = 1;
 constexpr le32 RESOURCE_ID = 1;
 constexpr rect DISPLAY{ 0, 0, 320, 200 };
+constexpr le32 FB_SIZE = DISPLAY.width * DISPLAY.height * sizeof(uint32_t);
+static_assert(
+    mem::PAGE_SIZE < FB_SIZE,
+    "frame buffer should be larger than the page size, otherwise we won't need to worry about cross page rows");
+// TODO unify MAX_PAGES and pages
+constexpr le32 MAX_PAGES = align_up(FB_SIZE, mem::PAGE_SIZE) / mem::PAGE_SIZE + 1;
+
+// It is guranteed that user allocated framebuffer isn't contiguous in physical memory,
+// because mem::alloc_frame pops free frames in descending order
+struct [[gnu::packed]] {
+    resource_attach_backing hdr;
+    mem_entry entries[MAX_PAGES];
+} attach_backing;
 
 } // namespace
 
@@ -141,7 +154,9 @@ void init() {
 
     controlq = device_init(base, vq_paddr, false, 0);
 
-    resource_create_2d create_2d{ { CMD_RESOURCE_CREATE_2D }, RESOURCE_ID, FORMAT_B8G8R8A8_UNORM, DISPLAY.width, DISPLAY.height };
+    resource_create_2d create_2d{
+        { CMD_RESOURCE_CREATE_2D }, RESOURCE_ID, FORMAT_B8G8R8A8_UNORM, DISPLAY.width, DISPLAY.height
+    };
     // We use identity mapping and busy-waiting, so it's find to take the stack variable address as-is
     controlq->descs[0].addr = reinterpret_cast<paddr_t>(&create_2d);
     controlq->descs[0].len = sizeof create_2d;
@@ -160,25 +175,33 @@ void init() {
 }
 
 void attach(const vaddr_t fb) {
-    // Assume contiguous now, TODO deal with scattered framebuffer
+    // Make sure all mem_entry is page aligned, otherwise we get interlaced double vision
+    vaddr_t page_vaddr = fb & ~static_cast<vaddr_t>(mem::PAGE_SIZE - 1);
+    le32 first_len = page_vaddr + mem::PAGE_SIZE - fb;
 
-    resource_attach_backing attach_backing{ { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, 1 };
+    attach_backing.entries[0] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, fb)), first_len, 0 };
+
+    auto remaining = FB_SIZE - first_len;
+    le32 pages = (remaining + mem::PAGE_SIZE - 1) / mem::PAGE_SIZE;
+
+    for (auto i = 1uz; i <= pages; ++i) {
+        auto vaddr = page_vaddr + i * mem::PAGE_SIZE;
+        le32 len = (i == pages) ? (remaining - (i - 1) * mem::PAGE_SIZE) : mem::PAGE_SIZE;
+        attach_backing.entries[i] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, vaddr)), len, 0 };
+    }
+
+    attach_backing.hdr = { { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, 1 + pages };
+
     controlq->descs[0].addr = reinterpret_cast<paddr_t>(&attach_backing);
     controlq->descs[0].len = sizeof attach_backing;
     controlq->descs[0].flags = DESC_F_NEXT;
     controlq->descs[0].next = 1;
 
-    mem_entry entry{ mem::to_paddr(proc::current->page_table, fb), DISPLAY.width * DISPLAY.height * sizeof(uint32_t) };
-    controlq->descs[1].addr = reinterpret_cast<paddr_t>(&entry);
-    controlq->descs[1].len = sizeof entry;
-    controlq->descs[1].flags = DESC_F_NEXT;
-    controlq->descs[1].next = 2;
-
     ctrl_hdr resp;
-    controlq->descs[2].addr = reinterpret_cast<paddr_t>(&resp);
-    controlq->descs[2].len = sizeof resp;
-    controlq->descs[2].flags = DESC_F_WRITE;
-    controlq->descs[2].next = 0;
+    controlq->descs[1].addr = reinterpret_cast<paddr_t>(&resp);
+    controlq->descs[1].len = sizeof resp;
+    controlq->descs[1].flags = DESC_F_WRITE;
+    controlq->descs[1].next = 0;
 
     virtq_kick(base, controlq, 0);
     while (virtq_is_busy(controlq)) {
@@ -187,8 +210,6 @@ void attach(const vaddr_t fb) {
     set_scanout scanout{ { CMD_SET_SCANOUT }, DISPLAY, 0, RESOURCE_ID };
     controlq->descs[0].addr = reinterpret_cast<paddr_t>(&scanout);
     controlq->descs[0].len = sizeof scanout;
-    controlq->descs[0].flags = DESC_F_NEXT;
-    controlq->descs[0].next = 2; // reuse resp
 
     virtq_kick(base, controlq, 0);
     while (virtq_is_busy(controlq)) {

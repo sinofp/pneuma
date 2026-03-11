@@ -111,6 +111,11 @@ local disk_img=disk-$arch.img
 cp result-$arch/disk.img $disk_img
 chmod +w $disk_img
 
+# Inject any local files from disk/ that aren't tracked by git (e.g. large game assets)
+for f in disk/*(.); do
+    mcopy -i $disk_img -o $f ::${f:t}
+done
+
 # Assign virtio-mmio bus slots in order of device registration
 local virtio_bus=0
 local data_disk_args boot_disk_args="" gpu_args=""

@@ -157,6 +157,12 @@
           objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
           lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
+          # Convert an ELF to a flat binary with BSS pre-allocated as zeroes,
+          # so image.size() covers the full virtual footprint (code+data+BSS+stack).
+          elfToBin = elfPath: binPath: ''
+            ${objcopy} --set-section-flags .bss=alloc,contents -O binary ${elfPath} ${binPath}
+          '';
+
           # Fetch FatFs source
           fatfs-src = pkgs.fetchzip {
             url = "https://elm-chan.org/fsw/ff/arc/ff16.zip";
@@ -353,7 +359,7 @@
               # then clang's resource dir for stdint.h/stddef.h/stdarg.h
               archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
               pie = if arch == "riscv64" then "-fPIE" else "";
-              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
+              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
 
               # List all libc object files
               libcCxxObjs = map (
@@ -432,7 +438,7 @@
                   *.o ${lib.concatStringsSep " " allLibcObjs}
 
                 # Convert to binary
-                ${objcopy} -O binary $out/doom.elf $out/doom.bin
+                ${elfToBin "$out/doom.elf" "$out/doom.bin"}
               '';
 
           # Build kernel with embedded user programs
@@ -442,6 +448,7 @@
               cfg = archConfigs.${arch};
               libc = mkLibc arch;
               flags = mkFlags arch "${libc}/include";
+              doom = mkDoom arch;
 
               # List all libc object files
               libcCxxObjs = map (
@@ -461,6 +468,53 @@
                 "${libc}/fatfs-diskio.o"
               ];
               allLibcObjs = libcCxxObjs ++ libcCObjs ++ fatfsObjs;
+
+              # Embed a flat binary into the kernel as _binary_<name>_bin_{start,end,size} symbols.
+              # binPath may be a Nix store path or a bash expression like "$out/foo.bin".
+              embedBin =
+                name: binPath:
+                let
+                  sym = lib.replaceStrings [ "-" ] [ "_" ] name;
+                in
+                ''
+                  cat > $out/${name}.S << ASMEOF
+                  .section .rodata
+                  .global _binary_${sym}_bin_start
+                  .global _binary_${sym}_bin_end
+                  .global _binary_${sym}_bin_size
+                  .balign 8
+                  _binary_${sym}_bin_start:
+                  .incbin "${binPath}"
+                  _binary_${sym}_bin_end:
+                  .set _binary_${sym}_bin_size, _binary_${sym}_bin_end - _binary_${sym}_bin_start
+                  ASMEOF
+                  ${clang} ${flags.kernel} -c $out/${name}.S -o $out/${name}.bin.o
+                '';
+
+              # Compile, link, and embed a user program.
+              # --set-section-flags .bss=alloc,contents is always applied so that image.size()
+              # covers the full virtual footprint (code + data + BSS + stack) and proc::create
+              # can compute heap_start as align_up(USER_BASE + image.size()) without any
+              # out-of-band communication from the binary.
+              buildAndEmbed =
+                progPath:
+                let
+                  progFile = basename progPath;
+                  name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
+                  isC = lib.hasSuffix ".c" progFile;
+                  progFlags = if isC then flags.c else flags.cxx;
+                in
+                ''
+                  ${clang} ${progFlags} -c -o user-${name}.o user/${progFile}
+                  ${clang} ${flags.cxx} \
+                    --ld-path=${lld} \
+                    -Wl,-T${libc}/user.ld \
+                    -Wl,-Map=$out/${name}.map \
+                    -o $out/${name}.elf \
+                    ${lib.concatStringsSep " " allLibcObjs} user-${name}.o
+                  ${elfToBin "$out/${name}.elf" "$out/${name}.bin"}
+                  ${embedBin name "$out/${name}.bin"}
+                '';
             in
             pkgs.runCommand "build-kernel-${arch}"
               {
@@ -482,45 +536,11 @@
                 mkdir -p user
                 ${lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
 
-                # Build user programs
-                ${lib.concatMapStringsSep "\n" (
-                  prog:
-                  let
-                    progFile = basename prog;
-                    name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
-                    isC = lib.hasSuffix ".c" progFile;
-                    progFlags = if isC then flags.c else flags.cxx;
-                  in
-                  ''
-                    # Build ${name}.elf
-                    ${clang} ${progFlags} -c -o user-${name}.o user/${progFile}
-                    ${clang} ${flags.cxx} \
-                      --ld-path=${lld} \
-                      -Wl,-T${libc}/user.ld \
-                      -Wl,-Map=$out/${name}.map \
-                      -o $out/${name}.elf \
-                      ${lib.concatStringsSep " " allLibcObjs} user-${name}.o
+                # Build and embed user programs
+                ${lib.concatMapStringsSep "\n" buildAndEmbed userPrograms}
 
-                    # Convert to binary
-                    ${objcopy} --set-section-flags .bss=alloc,contents -O binary $out/${name}.elf $out/${name}.bin
-
-                    # Create assembly wrapper to embed binary with proper ABI flags
-                    # Replace - with _ for valid assembly symbols
-                    sym=${lib.replaceStrings [ "-" ] [ "_" ] name}
-                    cat > $out/${name}.S << ASMEOF
-                    .section .rodata
-                    .global _binary_''${sym}_bin_start
-                    .global _binary_''${sym}_bin_end
-                    .global _binary_''${sym}_bin_size
-                    .balign 8
-                    _binary_''${sym}_bin_start:
-                    .incbin "$out/${name}.bin"
-                    _binary_''${sym}_bin_end:
-                    .set _binary_''${sym}_bin_size, _binary_''${sym}_bin_end - _binary_''${sym}_bin_start
-                    ASMEOF
-                    ${clang} ${flags.kernel} -c $out/${name}.S -o $out/${name}.bin.o
-                  ''
-                ) userPrograms}
+                # Embed doom binary
+                ${embedBin "doom" "${doom}/doom.bin"}
 
                 # Build kernel.elf with embedded user programs
                 ${clang} ${flags.kernel} \
@@ -529,11 +549,14 @@
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
                   ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
-                  ${lib.concatStringsSep " " (
-                    map (
-                      prog: "$out/${lib.removeSuffix ".c" (lib.removeSuffix ".cc" (basename prog))}.bin.o"
-                    ) userPrograms
-                  )}
+                  ${
+                    lib.concatStringsSep " " (
+                      map (
+                        prog: "$out/${lib.removeSuffix ".c" (lib.removeSuffix ".cc" (basename prog))}.bin.o"
+                      ) userPrograms
+                    )
+                  } \
+                  $out/doom.bin.o
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image

@@ -1,6 +1,7 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
 #include "dev/virtio-blk.h"
+#include "dev/virtio-gpu.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
@@ -226,6 +227,15 @@ void handle_syscall(trap::frame *f) {
             break;
         }
     } break;
+    case SYS_GET_TICKS:
+        f->a0 = csr::time::read_ms();
+        break;
+    case SYS_GPU_ATTACH:
+        virtio::gpu::attach(f->a0);
+        break;
+    case SYS_GPU_FLUSH:
+        virtio::gpu::flush();
+        break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }

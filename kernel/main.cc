@@ -23,7 +23,10 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
     mem::init();
 
+    printf("After mem::init\n");
+
     proc::idle = proc::create({ nullptr, 0 });
+    printf("After creating idle proc\n");
     // Set the idle process running manually, so it can be saved to readyq in reschedule
     proc::idle->state = proc::state_t::RUNNING;
     proc::chprio(proc::idle, proc::prio_t::N, false);
@@ -36,17 +39,19 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     virtio::blk::init();
     // Idle was created before blk::init() set base, so its page table lacks the MMIO mapping.
     // Add it now so interrupt handlers can access virtio MMIO while idle is current.
-    mem::map_page(proc::idle->page_table, virtio::blk::base, virtio::blk::base, mem::pte_t::flag::R | mem::pte_t::flag::W);
+    mem::map_page(proc::idle->page_table, virtio::blk::base, virtio::blk::base,
+                  mem::pte_t::flag::R | mem::pte_t::flag::W);
 
     virtio::gpu::init();
     if (fdt::uninitialised != virtio::gpu::base) {
-        mem::map_page(proc::idle->page_table, virtio::gpu::base, virtio::gpu::base, mem::pte_t::flag::R | mem::pte_t::flag::W);
+        mem::map_page(proc::idle->page_table, virtio::gpu::base, virtio::gpu::base,
+                      mem::pte_t::flag::R | mem::pte_t::flag::W);
 
-        static uint32_t fb[320 * 200];
-        for (auto &px : fb)
-            px = 0xFF0000FFu; // BGRA: blue
-        virtio::gpu::attach(reinterpret_cast<vaddr_t>(fb));
-        virtio::gpu::flush();
+        // static uint32_t fb[320 * 200];
+        // for (auto &px : fb)
+        //     px = 0xFF; // BGRA: blue
+        // virtio::gpu::attach(reinterpret_cast<vaddr_t>(fb));
+        // virtio::gpu::flush();
     }
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
@@ -65,11 +70,20 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     auto *shell = proc::create({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
 
-    proc::resume(libc_test);
+    proc::process *doom;
+    if (fdt::uninitialised != virtio::gpu::base) {
+        doom = proc::create({ _binary_doom_bin_start, reinterpret_cast<size_t>(_binary_doom_bin_size) });
+        printf("Process created: doom (%d)\n", doom->pid);
+    }
+
+    // proc::resume(libc_test);
 
     // proc::resume(proc_b, false);
     // proc::resume(proc_a, false);
-    proc::resume(shell, false);
+    // proc::resume(shell, false);
+    if (fdt::uninitialised != virtio::gpu::base) {
+        proc::resume(doom, false);
+    }
     proc::reschedule();
 
     // for (int i = 0; i < 5; ++i) {

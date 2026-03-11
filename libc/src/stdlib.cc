@@ -70,6 +70,10 @@ void *calloc(size_t count, size_t size) {
 }
 
 void free(void *ptr) {
+    // Doom calls free(NULL) on start for some reason
+    if (NULL == ptr)
+        return;
+
     auto *hptr = reinterpret_cast<header_t *>(reinterpret_cast<uint8_t *>(ptr) - sizeof(header_t));
     if (hptr->magic != 990529) {
         // TODO error

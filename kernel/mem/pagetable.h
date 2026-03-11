@@ -98,14 +98,14 @@ template <unsigned L> constexpr xlen_t vpn(vaddr_t vaddr) {
     static_assert(L < 3, "vpn supports levels 2, 1, and 0 at most");
     if constexpr (__riscv_xlen == 32) {
         if constexpr (L == 1)
-            return vaddr >> 22;       // [31:22]
+            return vaddr >> 22;               // [31:22]
         return (vaddr >> PAGE_SHIFT) & 0x3ff; // [21:PAGE_SHIFT]
     } else {
         if constexpr (L == 2)
             return (vaddr >> 30) & 0x1ff; // Ignore sign extension [63:39], keep [38:30]
         if constexpr (L == 1)
-            return (vaddr >> 21) & 0x1ff; // [29:21]
-        return (vaddr >> PAGE_SHIFT) & 0x1ff;     // [20:PAGE_SHIFT]
+            return (vaddr >> 21) & 0x1ff;     // [29:21]
+        return (vaddr >> PAGE_SHIFT) & 0x1ff; // [20:PAGE_SHIFT]
     }
 }
-}// namespace mem
+} // namespace mem
