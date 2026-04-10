@@ -2,6 +2,7 @@
 #include "dev/sbi.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
+#include "dev/virtio-input.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
@@ -236,6 +237,10 @@ void handle_syscall(trap::frame *f) {
     case SYS_GPU_FLUSH:
         virtio::gpu::flush();
         break;
+    case SYS_GET_INPUT: {
+        using namespace virtio::input;
+        f->a0 = dequeue(*reinterpret_cast<event *>(f->a0));
+    } break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
@@ -274,9 +279,11 @@ extern "C" void handle_trap(trap::frame *f) {
     } break;
     case SExternalIntr: {
         // External interrupt from PLIC
-        if (auto irq = plic::claim(0)) {
+        if (const auto irq = plic::claim(0)) {
             if (irq == virtio::blk::irq)
-                virtio::blk::handle_io_completion();
+                virtio::blk::handle_interrupt();
+            else if (irq == virtio::input::irq)
+                virtio::input::handle_interrupt();
             else
                 printf("Unexpected IRQ: %d\n", irq);
             plic::complete(0, irq);

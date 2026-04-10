@@ -6,7 +6,7 @@ namespace virtio::blk {
 
 void init();
 void read_write(void *buf, uint64_t sector, int is_write);
-void handle_io_completion();
+void handle_interrupt();
 
 extern paddr_t vq_paddr; // allocated by mem::init, consumed by virtq_init
 extern uint64_t capacity;

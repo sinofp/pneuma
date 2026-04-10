@@ -118,10 +118,12 @@ done
 
 # Assign virtio-mmio bus slots in order of device registration
 local virtio_bus=0
-local data_disk_args boot_disk_args="" gpu_args=""
+local data_disk_args keyboard_args boot_disk_args="" gpu_args=""
 
 data_disk_args="-drive id=drive0,file=$disk_img,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.$((virtio_bus++))"
+
+keyboard_args="-device virtio-keyboard-device,bus=virtio-mmio-bus.$((virtio_bus++))"
 
 # Create boot disk for U-Boot if needed
 if [[ $use_uboot == true ]] {
@@ -153,7 +155,7 @@ if [[ $use_gpu == true ]] {
 local qemu_common_args="-machine $qemu_machine \
       -bios $opensbi_fw -kernel $qemu_kernel \
       $nographic_arg \
-      $data_disk_args \
+      $data_disk_args $keyboard_args \
       $boot_disk_args $gpu_args"
 
 if [[ $use_dts == true && $use_uboot == true ]] {

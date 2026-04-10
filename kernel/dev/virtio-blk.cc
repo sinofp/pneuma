@@ -220,7 +220,7 @@ void read_write(void *buf, uint64_t sector, int is_write) {
     waiting_proc->state = proc::state_t::SUSPENDED;
     // Notify the device that there is a new request.
     virtq_kick(base, vq, 0);
-    // The interrupt might also fire here, triggering handle_io_completion before entering reschedule.
+    // The interrupt might also fire here, triggering handle_interrupt before entering reschedule.
     // It's fine because we allow switching to itself in reschedule specifically for this case.
     proc::reschedule();
 
@@ -236,7 +236,7 @@ void read_write(void *buf, uint64_t sector, int is_write) {
         memcpy(buf, req->data, SECTOR_SIZE);
 }
 
-void handle_io_completion() {
+void handle_interrupt() {
     // Acknowledge device interrupt
     auto status = mmio::read<uint32_t>(base, REG_INTERRUPT_STATUS);
     mmio::write<uint32_t>(base, REG_INTERRUPT_ACK, status);

@@ -6,12 +6,13 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-#define ASSERT(cond, msg) do { \
-    if (!(cond)) { \
-        printf("ASSERT FAILED: [%s:%d] %s\n", __FILE__, __LINE__, msg); \
-        return 1; \
-    } \
-} while (0)
+#define ASSERT(cond, msg)                                                   \
+    do {                                                                    \
+        if (!(cond)) {                                                      \
+            printf("ASSERT FAILED: [%s:%d] %s\n", __FILE__, __LINE__, msg); \
+            return 1;                                                       \
+        }                                                                   \
+    } while (0)
 
 int main(void) {
     // Test malloc
@@ -59,7 +60,8 @@ int main(void) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
     size_t n = fread(buf, 1, 27, f);
-    ASSERT(!strcmp("Hello from FAT filesystem!\n", buf), "fread HELLO.TXT should return 'Hello from FAT filesystem!\\n'");
+    ASSERT(!strcmp("Hello from FAT filesystem!\n", buf),
+           "fread HELLO.TXT should return 'Hello from FAT filesystem!\\n'");
 
     // Test ftell after read
     pos = ftell(f);
@@ -159,7 +161,7 @@ int main(void) {
 
     // memmove: dst is uninitialised — strlen(dst) would run off the buffer
     // and fault or return garbage. memmove must not call strlen on its arguments.
-    char *uninit = (char *)malloc(5);
+    char *uninit = (char *) malloc(5);
     memmove(uninit, "Hello", 5);
     ASSERT(memcmp(uninit, "Hello", 5) == 0, "memmove into uninitialised dst");
     free(uninit);
@@ -172,12 +174,12 @@ int main(void) {
 
     // memmove: overlapping, src before dst
     char mo[16] = "abcde";
-    memmove(mo + 2, mo, 4);  // "ab" "abcd" -> "ababcd" but only 5 chars written
+    memmove(mo + 2, mo, 4); // "ab" "abcd" -> "ababcd" but only 5 chars written
     ASSERT(mo[2] == 'a' && mo[3] == 'b' && mo[4] == 'c' && mo[5] == 'd', "memmove overlap src<dst");
 
     // memmove: overlapping, dst before src
     char mo2[16] = "abcde";
-    memmove(mo2, mo2 + 1, 4);  // shift left
+    memmove(mo2, mo2 + 1, 4); // shift left
     ASSERT(mo2[0] == 'b' && mo2[1] == 'c' && mo2[2] == 'd' && mo2[3] == 'e', "memmove overlap dst<src");
 
     // strncpy: basic copy
@@ -195,8 +197,8 @@ int main(void) {
     strncpy(dst3, "Hi", 6);
     ASSERT(dst3[2] == '\0' && dst3[3] == '\0', "strncpy null padding");
 
-    const char* src = "hi";
-    char dest[6] = {'a', 'b', 'c', 'd', 'e', 'f'};
+    const char *src = "hi";
+    char dest[6] = { 'a', 'b', 'c', 'd', 'e', 'f' };
     strncpy(dest, src, 5);
     ASSERT(memcmp(dest, "hi\0\0\0f", 6) == 0, "example from cppreference");
 
@@ -224,7 +226,7 @@ int main(void) {
     // strrchr: not found
     ASSERT(strrchr("abc", 'z') == NULL, "strrchr not found");
     // strrchr: last occurrence is at index 0
-    ASSERT(strrchr("abc", 'a') == (void *)"abc", "strrchr at index 0");
+    ASSERT(strrchr("abc", 'a') == (void *) "abc", "strrchr at index 0");
     // strrchr: find null terminator
     const char *rend = strrchr("abc", '\0');
     ASSERT(rend && *rend == '\0', "strrchr finds null");
@@ -237,9 +239,9 @@ int main(void) {
     // strstr: empty haystack
     ASSERT(strstr("", "abc") == NULL, "strstr empty haystack");
     // strstr: empty needle
-    ASSERT(strstr("Hello", "") == (void *)"Hello", "strstr empty needle");
+    ASSERT(strstr("Hello", "") == (void *) "Hello", "strstr empty needle");
     // strstr: needle at start
-    ASSERT(strstr("Hello", "Hell") == (void *)"Hello", "strstr at start");
+    ASSERT(strstr("Hello", "Hell") == (void *) "Hello", "strstr at start");
 
     // strcasecmp: equal
     ASSERT(strcasecmp("Hello", "hello") == 0, "strcasecmp equal");
@@ -378,7 +380,8 @@ int main(void) {
     printf("=== All snprintf tests passed! ===\n");
 
     printf("\n=== Testing sscanf ===\n");
-    int si; unsigned su;
+    int si;
+    unsigned su;
 
     // %d: basic positive
     ASSERT(sscanf("42", "%d", &si) == 1, "sscanf %d assigned");
@@ -457,15 +460,15 @@ int main(void) {
     printf("\n=== Testing ctype/math ===\n");
 
     // isprint: printable chars (0x20..0x7e)
-    ASSERT(isprint(' '),  "isprint space");
-    ASSERT(isprint('A'),  "isprint letter");
-    ASSERT(isprint('~'),  "isprint tilde");
+    ASSERT(isprint(' '), "isprint space");
+    ASSERT(isprint('A'), "isprint letter");
+    ASSERT(isprint('~'), "isprint tilde");
     ASSERT(!isprint('\0'), "isprint NUL");
     ASSERT(!isprint('\n'), "isprint newline");
     ASSERT(!isprint('\x7f'), "isprint DEL");
 
     // isspace: ' ' \t \n \r \f \v
-    ASSERT(isspace(' '),  "isspace space");
+    ASSERT(isspace(' '), "isspace space");
     ASSERT(isspace('\t'), "isspace tab");
     ASSERT(isspace('\n'), "isspace newline");
     ASSERT(isspace('\r'), "isspace CR");
@@ -482,9 +485,9 @@ int main(void) {
     ASSERT(toupper(' ') == ' ', "toupper space unchanged");
 
     // fabs
-    ASSERT(fabs(1.5)  == 1.5,  "fabs positive");
-    ASSERT(fabs(-1.5) == 1.5,  "fabs negative");
-    ASSERT(fabs(0.0)  == 0.0,  "fabs zero");
+    ASSERT(fabs(1.5) == 1.5, "fabs positive");
+    ASSERT(fabs(-1.5) == 1.5, "fabs negative");
+    ASSERT(fabs(0.0) == 0.0, "fabs zero");
 
     printf("=== All ctype/math tests passed! ===\n");
 

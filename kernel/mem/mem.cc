@@ -1,6 +1,7 @@
 #include "mem/mem.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
+#include "dev/virtio-input.h"
 #include "lib/span.h"
 
 namespace {
@@ -71,6 +72,7 @@ void init() {
     // To forbid the usage of alloc_pages after we initilise the free stack, we allocate the virtq here.
     constexpr auto virtq_pages = align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE;
     virtio::blk::vq_paddr = alloc_pages(virtq_pages);
+    virtio::input::vq_paddr = alloc_pages(virtq_pages);
     virtio::gpu::vq_paddr = alloc_pages(virtq_pages);
 
     auto base = bump_paddr;

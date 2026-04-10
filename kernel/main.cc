@@ -1,6 +1,7 @@
 #include "dev/sbi.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
+#include "dev/virtio-input.h"
 #include "fdt/fdt.h"
 #include "lib/symbols.h"
 #include "mem/mem.h"
@@ -40,6 +41,10 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     // Idle was created before blk::init() set base, so its page table lacks the MMIO mapping.
     // Add it now so interrupt handlers can access virtio MMIO while idle is current.
     mem::map_page(proc::idle->page_table, virtio::blk::base, virtio::blk::base,
+                  mem::pte_t::flag::R | mem::pte_t::flag::W);
+
+    virtio::input::init();
+    mem::map_page(proc::idle->page_table, virtio::input::base, virtio::input::base,
                   mem::pte_t::flag::R | mem::pte_t::flag::W);
 
     virtio::gpu::init();

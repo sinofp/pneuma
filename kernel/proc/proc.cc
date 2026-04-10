@@ -1,6 +1,7 @@
 #include "proc/proc.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
+#include "dev/virtio-input.h"
 #include "fdt/fdt.h"
 #include "lib/debug.h"
 #include "mem/mem.h"
@@ -92,9 +93,11 @@ process *create(span<const uint8_t> image) {
         mem::map_page(page_table, kaddr, kaddr, R | W | X);
 
     // All virtio-mmio have 0x00001000 size, so it's sufficient to map only one page to access their registers
-    // Map virtio-block MMIO, skip for idle proc because it is created before blk::init()
+    // Map virtio-block and virtio-input MMIO, skip for idle proc because it is created before blk::init()
     if (fdt::uninitialised != virtio::blk::base)
         mem::map_page(page_table, virtio::blk::base, virtio::blk::base, R | W);
+    if (fdt::uninitialised != virtio::input::base)
+        mem::map_page(page_table, virtio::input::base, virtio::input::base, R | W);
     // We might not even have GPU
     if (fdt::uninitialised != virtio::gpu::base)
         mem::map_page(page_table, virtio::gpu::base, virtio::gpu::base, R | W);
