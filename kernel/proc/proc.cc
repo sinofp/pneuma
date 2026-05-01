@@ -89,6 +89,24 @@ void idle_loop() {
     sbi::shutdown();
 }
 
+void backtrace() {
+    // This line assumes everything before proc::init setting proc::current must not call backtrace
+    printf("backtrace pid=%d:\n", current->pid);
+    auto fp = reinterpret_cast<xlen_t>(__builtin_frame_address(0));
+    printf("```zsh\n for addr (\n");
+    while (fp) {
+        // RISC-V Calling Contenvion: The previous frame pointer and return address pair will reside just prior to the
+        // current stack address held in fp. This puts the return address at fp - PTRSZ/8, and the previous frame
+        // pointer at fp - 2 * PTRSZ/8.
+        auto ra = reinterpret_cast<xlen_t *>(fp)[-1];
+        auto prev_fp = reinterpret_cast<xlen_t *>(fp)[-2];
+        printf("    %p\n", ra - 4); // Theoretically I should also take care of compressed inst.
+        fp = prev_fp;
+    }
+    // TODO save elf names for procs
+    printf(")\n    llvm-symbolizer --obj=result-rv64/kernel.elf $addr\n```\n");
+}
+
 process *create(span<const uint8_t> image) {
     // Find an unused process control structure.
     process *proc = nullptr;

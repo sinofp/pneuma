@@ -8,6 +8,7 @@ namespace proc {
 void init();
 [[noreturn]]
 void idle_loop();
+void backtrace();
 
 using id_t = uint16_t;  // >= log2(PROCS_MAX)
 constexpr id_t MAX = 8; // Maximum number of processes

@@ -246,7 +246,7 @@
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
               archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
-              common = "-g3 -Wall -Wextra ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie}";
+              common = "-g3 -Wall -Wextra ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie}";
             in
             {
               # Kernel C++ flags
@@ -256,7 +256,7 @@
               # User C flags
               c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir}";
               # FatFs C flags (relaxed warnings for third-party code)
-              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
+              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
             };
 
           # Build libc + FatFs for a specific architecture
@@ -359,7 +359,7 @@
               # then clang's resource dir for stdint.h/stddef.h/stdarg.h
               archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
               pie = if arch == "riscv64" then "-fPIE" else "";
-              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
+              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
 
               # List all libc object files
               libcCxxObjs = map (

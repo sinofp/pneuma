@@ -52,9 +52,18 @@ constexpr unsigned long DISK_IOCTL_GET_BLOCK_SIZE = 3;
 
 constexpr int EOF = -1;
 
+namespace sbi {
+[[noreturn]]
+extern void shutdown();
+}
+
+namespace proc {
+extern void backtrace();
+}
+
 #define PANIC(fmt, ...)                                                       \
     do {                                                                      \
         printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-        while (1) {                                                           \
-        }                                                                     \
+        proc::backtrace();                                                    \
+        sbi::shutdown();                                                      \
     } while (0)

@@ -21,7 +21,7 @@ void kernel_entry() {
     asm volatile(
         // clang-format off
         // When handling an exception in kernel, we can't use sscratch as our kernel stack because that's not written.
-        // I check Supervisor Previous Privilege (SPP) on wether to use sscrach (saves the kernel_stack for user):
+        // I check Supervisor Previous Privilege (SPP) on wether to use sscratch (saves the kernel_stack for user):
         // 'When a trap is taken, SPP is set to 0 if the trap originated from user mode, or 1 otherwise.'
         "addi sp, sp, -%[xlen_size]\n"
         STORE " t0, (sp)\n"
@@ -96,10 +96,26 @@ void kernel_entry() {
         "addi t3, sp, %[size]\n"
         "csrw sscratch, t3\n"
 
+        // Pass the trap::frame* to handle_trap
         "mv a0, sp\n"
+
+        // Setup a frame pointer and return address pair that links to the panic-ed frame
+        "addi sp, sp, -%[xlen_size]-%[xlen_size]\n"
+        // Save the previous fp
+        STORE " fp, (sp)\n"
+        "csrr t0, sepc\n"
+        // Point fp to 'the stack pointer value on entry to the current procedure', which was saved to a0 earlier
+        "mv fp, a0\n"
+        // Save 'return address' as-if there's no exception.
+        // Should I do this? There must be something wrong if we have an exception.
+        // However, I need do this to link the backtrace.
+        STORE " t0, %[xlen_size](sp)\n"
+
         "call handle_trap\n"
 
         "__restore:\n"
+        // Pop the prev fp and ra
+        "addi sp, sp, %[xlen_size]+%[xlen_size]\n"
         LOAD " t0, %[sepc](sp)\n"
         "csrw sepc, t0\n"
         LOAD " t1, %[sstatus](sp)\n"

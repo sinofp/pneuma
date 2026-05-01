@@ -109,6 +109,8 @@ void boot() {
 
         // Actual boot code
         "__after_image_header:\n"
+        "li s0, 0\n" // RISC-V Calling Convention: The end of the frame record chain is indicated by a NULL pointer
+                     // appearing as the next link in the chain
         "la sp, __stack_top\n" // Load stack top address
         "j kernel_main\n"      // Jump to the kernel main function
     );
