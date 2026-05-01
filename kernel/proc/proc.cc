@@ -1,4 +1,5 @@
 #include "proc/proc.h"
+#include "dev/sbi.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
 #include "dev/virtio-input.h"
@@ -12,7 +13,8 @@
 namespace proc {
 process procs[MAX]; // All process control structures.
 process *current;   // Currently running process
-process *idle;      // Idle process
+qent qtab[NQENT];
+static_assert(sizeof(qtab) < mem::PAGE_SIZE, "qtab is larger than one frame, should be allocated by alloc_pages");
 } // namespace proc
 
 using enum proc::state_t;
@@ -56,6 +58,37 @@ struct [[gnu::packed]] reg_ctx {
 } // namespace
 
 namespace proc {
+void init() {
+    // csr::intr_guard g;
+
+    // Initialize each queue's head/tail pair
+    for (id_t head = MAX; head < NQENT; head += 2) {
+        id_t tail = head + 1;
+
+        // The MINKEY at tail is used to ensure the descending priority queue can find a place to insert.
+        qtab[head] = { {}, tail, {} };
+        qtab[tail] = { MINKEY, {}, head };
+    }
+
+    current = create({ nullptr, 0 });
+    printf("After creating idle proc\n");
+    // Set the idle process running manually, so it can be saved to readyq in reschedule
+    current->state = state_t::RUNNING;
+    chprio(current, prio_t::N, false);
+}
+
+[[noreturn]]
+void idle_loop() {
+    for (;;) {
+        // printf("switched to idle process\n");
+        asm("wfi");
+        proc::reschedule();
+    }
+
+    printf("I'm going to bed, bye.\n");
+    sbi::shutdown();
+}
+
 process *create(span<const uint8_t> image) {
     // Find an unused process control structure.
     process *proc = nullptr;
@@ -208,7 +241,7 @@ namespace proc {
 void ready(process *proc, bool instant) {
     csr::intr_guard g;
     proc->state = READY;
-    ready_queue().insert_desc(proc->pid, static_cast<qkey_t>(proc->prio));
+    proc::ready_queue().enqueue(proc->pid, static_cast<qkey_t>(proc->prio));
     if (instant)
         reschedule();
 }
@@ -217,8 +250,8 @@ void chprio(process *proc, proc::prio_t prio, bool instant) {
     proc->prio = prio;
     if (READY == proc->state) {
         csr::intr_guard g;
-        ready_queue().remove(proc->pid);
-        ready_queue().insert_desc(proc->pid, static_cast<qkey_t>(proc->prio));
+        proc::ready_queue().remove(proc->pid);
+        proc::ready_queue().enqueue(proc->pid, static_cast<qkey_t>(proc->prio));
     }
 }
 
@@ -226,7 +259,7 @@ void suspend(process *proc, bool instant) {
     csr::intr_guard g;
     switch (proc->state) {
     case READY:
-        ready_queue().remove(proc->pid);
+        proc::ready_queue().remove(proc->pid);
         proc->state = SUSPENDED;
         break;
     case RUNNING:
@@ -253,16 +286,14 @@ void sleep_ms(int32_t delay) {
         ready(current);
         return;
     }
-    if (MAXKEY <= delay)
-        PANIC("Sleeping time exceeds MAXKEY.");
     csr::intr_guard g;
-    sleep_queue().insert_delta(current->pid, delay);
+    proc::sleep_queue().enqueue(current->pid, delay);
     current->state = proc::state_t::SLEEPING;
     reschedule();
 }
 
 void wakeup() {
-    auto sleepq = sleep_queue();
+    auto sleepq = proc::sleep_queue();
     while (!sleepq.empty() and sleepq.first_key() <= 0) {
         auto pid = sleepq.dequeue();
         // Given that the queue is nonempty, dequeue must have value
@@ -279,11 +310,11 @@ void reschedule() {
     //        static_cast<int>(current->prio), RUNNING == current->state);
     // print_procs();
     // printf("readyq:\n");
-    // print(ready_queue);
+    // print(proc::ready_queue);
     // printf("sleepq:\n");
-    // print(sleep_queue);
+    // print(proc::sleep_queue);
 
-    auto readyq = ready_queue();
+    auto readyq = proc::ready_queue();
 
     // The caller is supposed to change the state if needed
     // If it's still running, we only switch if a higher priority process is ready
@@ -292,9 +323,9 @@ void reschedule() {
             return;
 
         current->state = READY;
-        readyq.insert_desc(current->pid, static_cast<qkey_t>(current->prio));
-        // printf("readyq after insert_desc:\n");
-        // print(ready_queue);
+        readyq.enqueue(current->pid, static_cast<qkey_t>(current->prio));
+        // printf("readyq after enqueue:\n");
+        // print(proc::ready_queue);
     }
 
     // Switch to highest priority ready process

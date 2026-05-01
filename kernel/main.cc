@@ -1,4 +1,3 @@
-#include "dev/sbi.h"
 #include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
 #include "dev/virtio-input.h"
@@ -19,20 +18,14 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         printf("  virtio device %d: base=0x%lx, irq=%d\n", i, fdt::virtio_devices[i].mmio_base,
                fdt::virtio_devices[i].irq);
 
-    queue::init();
     trap::init();
 
     mem::init();
 
     printf("After mem::init\n");
 
-    proc::idle = proc::create({ nullptr, 0 });
-    printf("After creating idle proc\n");
-    // Set the idle process running manually, so it can be saved to readyq in reschedule
-    proc::idle->state = proc::state_t::RUNNING;
-    proc::chprio(proc::idle, proc::prio_t::N, false);
-    proc::current = proc::idle;
-    printf("Process created: idle (%d)\n", proc::idle->pid);
+    proc::init();
+    printf("Process created: idle (%d)\n", proc::current->pid);
 
     // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
     // Therefore it must be placed after idle_proc = create_process, otherwise we'll have
@@ -40,16 +33,16 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     virtio::blk::init();
     // Idle was created before blk::init() set base, so its page table lacks the MMIO mapping.
     // Add it now so interrupt handlers can access virtio MMIO while idle is current.
-    mem::map_page(proc::idle->page_table, virtio::blk::base, virtio::blk::base,
+    mem::map_page(proc::current->page_table, virtio::blk::base, virtio::blk::base,
                   mem::pte_t::flag::R | mem::pte_t::flag::W);
 
     virtio::input::init();
-    mem::map_page(proc::idle->page_table, virtio::input::base, virtio::input::base,
+    mem::map_page(proc::current->page_table, virtio::input::base, virtio::input::base,
                   mem::pte_t::flag::R | mem::pte_t::flag::W);
 
     virtio::gpu::init();
     if (fdt::uninitialised != virtio::gpu::base) {
-        mem::map_page(proc::idle->page_table, virtio::gpu::base, virtio::gpu::base,
+        mem::map_page(proc::current->page_table, virtio::gpu::base, virtio::gpu::base,
                       mem::pte_t::flag::R | mem::pte_t::flag::W);
 
         // static uint32_t fb[320 * 200];
@@ -91,15 +84,7 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     }
     proc::reschedule();
 
-    // for (int i = 0; i < 5; ++i) {
-    for (;;) {
-        // printf("switched to idle process\n");
-        asm("wfi");
-        proc::reschedule();
-    }
-
-    printf("I'm going to bed, bye.\n");
-    sbi::shutdown();
+    proc::idle_loop();
 }
 
 [[using gnu: section(".text.boot"), naked]]

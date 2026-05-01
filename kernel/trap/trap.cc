@@ -264,14 +264,14 @@ extern "C" void handle_trap(trap::frame *f) {
     case STimerIntr: {
         set_next_timer_interrupt();
         // printf("Time: %ldms!\n", static_cast<long>(csr::time::read_ms()));
-        auto sleepq = sleep_queue();
+        auto sleepq = proc::sleep_queue();
         if (!sleepq.empty()) {
             // printf("Adjusting sleeping delta list\n");
             sleepq.first_key() -= timer_interrupt_ms;
             if (sleepq.first_key() <= 0)
                 proc::wakeup();
         }
-        if (--preempt <= 0 and !ready_queue().empty()) {
+        if (--preempt <= 0 and !proc::ready_queue().empty()) {
             // printf("Preempt scheduling\n");
             preempt = quantum;
             proc::reschedule();

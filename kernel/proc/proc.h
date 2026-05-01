@@ -5,6 +5,10 @@
 
 namespace proc {
 
+void init();
+[[noreturn]]
+void idle_loop();
+
 using id_t = uint16_t;  // >= log2(PROCS_MAX)
 constexpr id_t MAX = 8; // Maximum number of processes
 
@@ -16,7 +20,7 @@ enum class state_t {
     SLEEPING,
 };
 
-enum class prio_t : int32_t {
+enum class prio_t : int_fast8_t {
     V = 5,
     IV = 4,
     III = 3,
@@ -53,5 +57,5 @@ void sleep_ms(int32_t);
 void wakeup();
 void reschedule();
 
-inline bool bad_id(id_t id) { return id < 0 or MAX <= id or state_t::UNUSED == proc::procs[id].state; }
+inline bool bad_id(id_t id) { return MAX <= id or state_t::UNUSED == proc::procs[id].state; }
 } // namespace proc

@@ -3,55 +3,45 @@
 #include "lib/optional.h"
 #include "proc/proc.h"
 
-// TODO wrap everytihing in proc namespace?
+namespace proc {
 
-using qkey_t = int32_t;   // Use int for minus MINKEY TODO better approach
-using qid_t = proc::id_t; // Since the index is pid
+// It needs to hold prio_t or sleep_ms delta
+using qkey_t = int32_t;              // Use int for minus MINKEY TODO better approach
+constexpr qkey_t MINKEY = INT32_MIN; // It doesn't have to be the smallest possible value, it only needs to be smaller
+                                     // than the smallest valid value
 
-// TODO consider removing it because we don't rely on this special value for empty()
-constexpr qid_t EMPTY = -1;
-constexpr qkey_t MAXKEY = 0x7FFFFFFF;
-constexpr qkey_t MINKEY = 0x80000000;
-
-constexpr size_t NQUEUES = 2;                       // # of different queues (ready, sleep, etc.)
-constexpr size_t NQENT = proc::MAX + (NQUEUES * 2); // * 2 for head & tail
-constexpr qid_t READY_QUEUE = proc::MAX;
-constexpr qid_t SLEEP_QUEUE = proc::MAX + 2;
+constexpr size_t NQUEUES = 2;                 // # of different queues (ready, sleep, etc.)
+constexpr size_t NQENT = MAX + (NQUEUES * 2); // * 2 for head & tail
+constexpr id_t READY_QUEUE = MAX;
+constexpr id_t SLEEP_QUEUE = MAX + 2;
 
 struct qent {
     qkey_t key;
-    qid_t next;
-    qid_t prev;
+    id_t next;
+    id_t prev;
 };
 
 // I must declare it here for queue_view inline methods.
 // I might make the methods non-inline because I don't want other source files able to access qtab directly.
 extern qent qtab[];
 
-namespace queue {
-void init();
-} // namespace queue
-
 // 'Different' queues that uses qtab
 class queue_view {
-    qid_t q;
+    id_t q;
 
 public:
-    constexpr qid_t head_id() const { return q; }
+    constexpr id_t head_id() const { return q; }
 
-    constexpr qid_t tail_id() const { return q + 1; }
+    constexpr id_t tail_id() const { return q + 1; }
 
-    qid_t first_id() const { return qtab[head_id()].next; }
+    id_t first_id() const { return qtab[head_id()].next; }
 
-    // TODO remove?
-    // qid_t last_id() const { return qtab[tail_id()].prev; }
-
-    explicit constexpr queue_view(qid_t id)
+    explicit constexpr queue_view(id_t id)
         : q(id) {}
 
     // For range-based for loop
     struct iterator {
-        qid_t curr;
+        id_t curr;
 
         const qent &operator*() const { return qtab[curr]; }
 
@@ -60,40 +50,21 @@ public:
             return *this;
         }
 
-        bool operator!=(qid_t sentinel) const { return curr != sentinel; }
+        bool operator!=(id_t sentinel) const { return curr != sentinel; }
     };
 
     iterator begin() const { return iterator{ first_id() }; }
 
-    qid_t end() const { return tail_id(); }
+    id_t end() const { return tail_id(); }
 
-    // Queue is empty if first entry points to something >= proc::MAX (i.e., tail)
-    // TODO change it to first_id() == tail_id()?
-    bool empty() const { return first_id() >= static_cast<qid_t>(proc::MAX); }
+    // This check is stircter than Xinu.
+    // However, with careful code, this will do fine.
+    bool empty() const { return first_id() == tail_id(); }
 
     // Return a reference so we can modify (for sleep queue)
     qkey_t &first_key() const { return qtab[first_id()].key; }
 
-    // Insert at the end.
-    // This method is only used for FIFO queues, so we ignore their key (priority)
-    inline optional<proc::id_t> enqueue(proc::id_t pid) {
-        if (proc::bad_id(pid)) {
-            return nullopt;
-        }
-
-        auto tail = tail_id();
-        auto prev = qtab[tail].prev;
-
-        qtab[pid].next = tail;
-        qtab[pid].prev = prev;
-
-        qtab[prev].next = pid;
-        qtab[tail].prev = pid;
-
-        return pid;
-    }
-
-    inline optional<qid_t> dequeue() {
+    inline optional<id_t> dequeue() {
         if (empty()) {
             return nullopt;
         }
@@ -104,23 +75,22 @@ public:
         qtab[head_id()].next = second_id;
         qtab[second_id].prev = head_id();
 
-        // TODO remove?
-        qtab[pid] = { 0, EMPTY, EMPTY };
-
         return pid;
     }
+};
 
-    inline optional<proc::id_t> insert_desc(proc::id_t pid, qkey_t key) {
-        if (proc::bad_id(pid))
+struct ready_queue_t : public queue_view {
+    using queue_view::queue_view;
+
+    inline optional<id_t> enqueue(id_t pid, qkey_t key) {
+        if (bad_id(pid))
             return nullopt;
 
-        qid_t next;
+        id_t next;
         // Xinu book: 'The loop must eventually terminate because the key of the tail element contains a value less than
         // the smallest valid key'
         // Keep = in <= to preserve insertion order when the priority is the same.
-        // I removed it because I don't have chprio, and I want to switch to a non-idle process
         for (next = first_id(); key <= qtab[next].key; next = qtab[next].next) {
-            // for (next = first_id(); key < qtab[next].key; next = qtab[next].next) {
         }
 
         // Insert the new element between prev and next
@@ -133,11 +103,27 @@ public:
         return pid;
     }
 
-    inline optional<proc::id_t> insert_delta(proc::id_t pid, qid_t key) {
-        if (proc::bad_id(pid))
+    inline optional<id_t> remove(id_t pid) {
+        if (bad_id(pid))
             return nullopt;
 
-        qid_t next;
+        auto next = qtab[pid].next;
+        auto prev = qtab[pid].prev;
+        qtab[prev].next = next;
+        qtab[next].prev = prev;
+
+        return pid;
+    }
+};
+
+struct sleep_queue_t : public queue_view {
+    using queue_view::queue_view;
+
+    inline optional<id_t> enqueue(id_t pid, qkey_t key) {
+        if (bad_id(pid))
+            return nullopt;
+
+        id_t next;
         // Xinu book: 'At any time during the search, both key and qtab[next].key specify a delay relative to the time
         // at which the predecessor of "next" awakens.'
         for (next = first_id(); next != tail_id() and qtab[next].key <= key;
@@ -154,20 +140,10 @@ public:
 
         return pid;
     }
-
-    inline optional<proc::id_t> remove(proc::id_t pid) {
-        if (proc::bad_id(pid))
-            return nullopt;
-
-        auto next = qtab[pid].next;
-        auto prev = qtab[pid].prev;
-        qtab[prev].next = next;
-        qtab[next].prev = prev;
-
-        return pid;
-    }
 };
 
-constexpr queue_view ready_queue() { return queue_view(READY_QUEUE); }
+constexpr auto ready_queue() { return ready_queue_t(READY_QUEUE); }
 
-constexpr queue_view sleep_queue() { return queue_view(SLEEP_QUEUE); }
+constexpr auto sleep_queue() { return sleep_queue_t(SLEEP_QUEUE); }
+
+} // namespace proc

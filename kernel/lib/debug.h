@@ -3,7 +3,7 @@
 #include "proc/proc.h"
 #include "proc/qtab.h"
 
-inline void print(queue_view (*queue)()) {
+inline void print(proc::queue_view (*queue)()) {
     auto q = queue();
     auto pid = q.first_id();
     for (const auto &qe : q) {
