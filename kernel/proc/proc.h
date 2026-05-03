@@ -10,8 +10,8 @@ void init();
 void idle_loop();
 void backtrace();
 
-using id_t = uint16_t;  // >= log2(PROCS_MAX)
-constexpr id_t MAX = 8; // Maximum number of processes
+using id_t = intptr_t; // Signed, so it can convey error code. PTRSZ, so passing by register for syscall preserves signess
+constexpr id_t MAX = 8; // Maximum number of processes, for now
 
 enum class state_t {
     UNUSED,
@@ -19,6 +19,8 @@ enum class state_t {
     READY,
     RUNNING,
     SLEEPING,
+    SENDING,
+    RECEIVING,
 };
 
 enum class prio_t : int_fast8_t {
@@ -38,6 +40,12 @@ struct process {
                 // be a vaddr_t *.
     uint8_t stack[1024 * 1024]; // Kernel stack
     mem::pt_t page_table;       // Page table for this process
+    span<uint8_t> msg_buffer{ nullptr, 0 };
+
+    union {
+        id_t sender;
+        id_t recipient;
+    };
 };
 
 // The base virtual address of an application image. This needs to match the
@@ -48,7 +56,7 @@ extern process procs[MAX];
 extern process *current;
 extern process *idle;
 
-process *create(span<const uint8_t> image);
+process *create(span<const uint8_t>);
 void destroy(process *);
 void chprio(process *, prio_t, bool = true);
 void suspend(process *, bool = true);
@@ -56,7 +64,8 @@ void resume(process *, bool = true);
 void ready(process *, bool = true);
 void sleep_ms(int32_t);
 void wakeup();
+id_t message_passing(span<uint8_t>, id_t, bool);
 void reschedule();
 
-inline bool bad_id(id_t id) { return MAX <= id or state_t::UNUSED == proc::procs[id].state; }
+inline bool bad_id(id_t id) { return id < 0 or MAX <= id or state_t::UNUSED == proc::procs[id].state; }
 } // namespace proc

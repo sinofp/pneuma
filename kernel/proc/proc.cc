@@ -174,7 +174,7 @@ process *create(span<const uint8_t> image) {
 
     // Initialize fields.
     // Can't construct and swap because the uint8_t stack[];
-    proc->pid = i;
+    proc->pid = i; // TODO pid is always its index in procs. Consider removing?
     // MLFQ rule 3: Put process in the highest queue when created
     // I give it to the second highest because I'll give interactive program (shell) the highest.
     // Although that means only the shell takes the CPU forever.
@@ -319,6 +319,63 @@ void wakeup() {
         ready(&procs[pid.value()], false);
     }
     reschedule();
+}
+
+id_t message_passing(span<uint8_t> buffer, id_t rank, bool send) {
+    if ((-1 != rank and !send) and bad_id(rank))
+        return -1;
+    using enum state_t;
+    printf("Current pid is %ld, %s pid %ld\n", current->pid, send ? "sending to" : "recving from", rank);
+    // csr::intr_guard g;
+    if (send) {
+        auto &recipient = procs[rank];
+        if (RECEIVING == recipient.state and (-1 == recipient.sender or current->pid == recipient.sender)) {
+            printf("Found the recipient for current send\n");
+            auto length = min(buffer.size(), recipient.msg_buffer.size());
+            mem::cross_proc_memcpy(recipient.page_table, reinterpret_cast<vaddr_t>(recipient.msg_buffer.data()),
+                                   current->page_table, reinterpret_cast<vaddr_t>(buffer.data()), length);
+            recipient.sender = current->pid; // so the recipient with sender=-1 knows who's the real sender after resuming
+            ready(&recipient, false);
+            return rank;
+        } else {
+            printf("Didn't find the recipient for current send\n");
+            current->state = SENDING;
+            current->msg_buffer = buffer;
+            current->recipient = rank;
+
+            // send_queue().enqueue(current->pid, static_cast<qkey_t>(current->prio));
+            reschedule();
+            return rank;
+        }
+    } else {
+        id_t start = (-1 == rank) ? 0 : rank;
+        id_t end = (-1 == rank) ? MAX : (rank + 1);
+        // TODO put the procs into a sending priority queue
+        bool nobody_sending = true;
+        for (auto i = start; i < end; ++i)
+            if (auto &sender = procs[i]; SENDING == sender.state and current->pid == sender.recipient) {
+                printf("Found the sender for current recv\n");
+                auto length = min(buffer.size(), sender.msg_buffer.size());
+                mem::cross_proc_memcpy(current->page_table, reinterpret_cast<vaddr_t>(buffer.data()),
+                                       sender.page_table, reinterpret_cast<vaddr_t>(sender.msg_buffer.data()), length);
+
+                nobody_sending = false;
+                ready(&sender, false);
+                return i;
+            }
+
+        if (nobody_sending) {
+            printf("Didn't find the sender for current recv\n");
+
+            current->state = RECEIVING;
+            current->msg_buffer = buffer;
+            current->sender = rank;
+
+            // recv_queue().enqueue(current->pid, static_cast<qkey_t>(current->prio));
+            reschedule();
+            return current->sender;
+        }
+    }
 }
 
 void reschedule() {

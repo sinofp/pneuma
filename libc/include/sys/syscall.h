@@ -14,6 +14,8 @@
 #define SYS_GPU_ATTACH 9
 #define SYS_GPU_FLUSH 10
 #define SYS_GET_INPUT 11
+#define SYS_MP_SSEND 12
+#define SYS_MP_RECV 13
 
 // DISK_IOCTL commands
 #define DISK_IOCTL_GET_SECTOR_COUNT 1

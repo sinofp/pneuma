@@ -174,23 +174,16 @@ void init() {
     }
 }
 
+
 void attach(const vaddr_t fb) {
     // Make sure all mem_entry is page aligned, otherwise we get interlaced double vision
-    vaddr_t page_vaddr = fb & ~static_cast<vaddr_t>(mem::PAGE_SIZE - 1);
-    le32 first_len = page_vaddr + mem::PAGE_SIZE - fb;
 
-    attach_backing.entries[0] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, fb)), first_len, 0 };
+    le32 nr_entries = 0;
+    mem::for_page_seg(fb, FB_SIZE, [&](vaddr_t vaddr, size_t len) {
+        attach_backing.entries[nr_entries++] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, vaddr)), static_cast<le32>(len), 0 };
+    });
 
-    auto remaining = FB_SIZE - first_len;
-    le32 pages = (remaining + mem::PAGE_SIZE - 1) / mem::PAGE_SIZE;
-
-    for (auto i = 1uz; i <= pages; ++i) {
-        auto vaddr = page_vaddr + i * mem::PAGE_SIZE;
-        le32 len = (i == pages) ? (remaining - (i - 1) * mem::PAGE_SIZE) : mem::PAGE_SIZE;
-        attach_backing.entries[i] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, vaddr)), len, 0 };
-    }
-
-    attach_backing.hdr = { { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, 1 + pages };
+    attach_backing.hdr = { { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, nr_entries };
 
     controlq->descs[0].addr = reinterpret_cast<paddr_t>(&attach_backing);
     controlq->descs[0].len = sizeof attach_backing;

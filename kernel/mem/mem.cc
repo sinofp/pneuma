@@ -180,6 +180,17 @@ paddr_t to_paddr(pt_t &root_table, vaddr_t vaddr) {
     return leaf_pte.paddr() | (vaddr & (PAGE_SIZE - 1));
 }
 
+void cross_proc_memcpy(pt_t &dst_pt, vaddr_t dst, pt_t &src_pt, vaddr_t src, size_t len) {
+    size_t chunk;
+    for (; 0 < len; src += chunk, dst += chunk, len -= chunk) {
+        chunk = min(len, min(PAGE_SIZE - (src & (PAGE_SIZE - 1)),
+                             PAGE_SIZE - (dst & (PAGE_SIZE - 1))));
+        // All paddr is identically mapped, so no need to update page tables
+        memcpy(reinterpret_cast<void *>(to_paddr(dst_pt, dst)),
+               reinterpret_cast<void *>(to_paddr(src_pt, src)), chunk);
+    }
+}
+
 void destroy_page_table(pt_t &root_table) {
     auto free_level = [=](this auto &&self, pt_t &table) -> void {
         for (size_t i = 0; i < pt_t::size; ++i) {

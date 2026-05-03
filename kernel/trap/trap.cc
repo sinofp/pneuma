@@ -257,6 +257,14 @@ void handle_syscall(trap::frame *f) {
         using namespace virtio::input;
         f->a0 = dequeue(*reinterpret_cast<event *>(f->a0));
     } break;
+    case SYS_MP_SSEND:
+        // printf("\n\n\nSsend(addr=%p, addr[0]=%d, recipient=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0), f->a2);
+        f->a0 = static_cast<xlen_t>(proc::message_passing({ reinterpret_cast<uint8_t *>(f->a0), f->a1 }, f->a2, true));
+        break;
+    case SYS_MP_RECV:
+        // printf("\n\n\nRecv(addr=%p, addr[0]=%d, sender=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0), f->a2);
+        f->a0 = static_cast<xlen_t>(proc::message_passing({ reinterpret_cast<uint8_t *>(f->a0), f->a1 }, f->a2, false));
+        break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }

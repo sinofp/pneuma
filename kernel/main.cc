@@ -74,13 +74,14 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         printf("Process created: doom (%d)\n", doom->pid);
     }
 
-    // proc::resume(libc_test);
-
-    // proc::resume(proc_b, false);
-    // proc::resume(proc_a, false);
     // proc::resume(shell, false);
     if (fdt::uninitialised != virtio::gpu::base) {
         proc::resume(doom, false);
+    } else {
+        // proc::resume(libc_test);
+
+        proc::resume(proc_b, false);
+        proc::resume(proc_a, false);
     }
     proc::reschedule();
 

@@ -44,6 +44,8 @@ constexpr unsigned long SYS_GET_TICKS = 8;
 constexpr unsigned long SYS_GPU_ATTACH = 9;
 constexpr unsigned long SYS_GPU_FLUSH = 10;
 constexpr unsigned long SYS_GET_INPUT = 11;
+constexpr unsigned long SYS_MP_SSEND = 12;
+constexpr unsigned long SYS_MP_RECV = 13;
 
 // DISK_IOCTL commands
 constexpr unsigned long DISK_IOCTL_GET_SECTOR_COUNT = 1;
