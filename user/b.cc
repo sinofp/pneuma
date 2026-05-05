@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/ipc.h>
 #include <sys/misc.h>
 
 extern "C" void main(void) {

@@ -192,8 +192,9 @@ void handle_syscall(trap::frame *f) {
                 f->a0 = ch;
                 break;
             }
-            // Give interact process higher priority
-            // chprio(current_proc, ProcPrio::V);
+
+            // Let other ready procs run for a brief moment
+            proc::sleep_ms(1);
         }
         break;
     case SYS_EXIT:
@@ -204,6 +205,8 @@ void handle_syscall(trap::frame *f) {
         PANIC("unreachable");
     case SYS_DISK_READ:
     case SYS_DISK_WRITE: {
+        if (proc::FILE_SERVER != proc::current->pid)
+            return;
         size_t sector = f->a0;
         auto *buf = reinterpret_cast<char *>(f->a1);
 
@@ -229,6 +232,8 @@ void handle_syscall(trap::frame *f) {
         proc::sleep_ms(f->a0);
         break;
     case SYS_DISK_IOCTL: {
+        if (proc::FILE_SERVER != proc::current->pid)
+            return;
         switch (f->a0) {
         case DISK_IOCTL_GET_SECTOR_COUNT:
             f->a0 = static_cast<xlen_t>(virtio::blk::capacity);
@@ -258,7 +263,8 @@ void handle_syscall(trap::frame *f) {
         f->a0 = dequeue(*reinterpret_cast<event *>(f->a0));
     } break;
     case SYS_MP_SSEND:
-        // printf("\n\n\nSsend(addr=%p, addr[0]=%d, recipient=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0), f->a2);
+        // printf("\n\n\nSsend(addr=%p, addr[0]=%d, recipient=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0),
+        // f->a2);
         f->a0 = static_cast<xlen_t>(proc::message_passing({ reinterpret_cast<uint8_t *>(f->a0), f->a1 }, f->a2, true));
         break;
     case SYS_MP_RECV:

@@ -344,6 +344,10 @@
                 # Also copy headers and linker script for user programs
                 cp -r include $out/include
                 cp ${./user/user.ld} $out/user.ld
+
+                # Export FatFs headers for the file server (user/fs.cc)
+                mkdir -p $out/include/fatfs
+                cp fatfs/ff.h fatfs/diskio.h fatfs/ffconf.h $out/include/fatfs/
               '';
 
           # Build Doom for a specific architecture
@@ -378,7 +382,7 @@
                 "${libc}/fatfs-ff.o"
                 "${libc}/fatfs-diskio.o"
               ];
-              allLibcObjs = libcCxxObjs ++ libcCObjs ++ fatfsObjs;
+              allLibcObjs = libcCxxObjs ++ libcCObjs;
             in
             pkgs.runCommand "doom-${arch}"
               {
@@ -503,15 +507,19 @@
                   name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
                   isC = lib.hasSuffix ".c" progFile;
                   progFlags = if isC then flags.c else flags.cxx;
+                  isFs = name == "fs";
+                  # fs links FatFs directly; all others use IPC through stdio.cc
+                  linkObjs = if isFs then libcCxxObjs ++ libcCObjs ++ fatfsObjs else libcCxxObjs ++ libcCObjs;
+                  extraFlags = if isFs then "-I${libc}/include/fatfs" else "";
                 in
                 ''
-                  ${clang} ${progFlags} -c -o user-${name}.o user/${progFile}
+                  ${clang} ${progFlags} ${extraFlags} -c -o user-${name}.o user/${progFile}
                   ${clang} ${flags.cxx} \
                     --ld-path=${lld} \
                     -Wl,-T${libc}/user.ld \
                     -Wl,-Map=$out/${name}.map \
                     -o $out/${name}.elf \
-                    ${lib.concatStringsSep " " allLibcObjs} user-${name}.o
+                    ${lib.concatStringsSep " " linkObjs} user-${name}.o
                   ${elfToBin "$out/${name}.elf" "$out/${name}.bin"}
                   ${embedBin name "$out/${name}.bin"}
                 '';

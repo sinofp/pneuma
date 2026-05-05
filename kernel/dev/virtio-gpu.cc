@@ -174,13 +174,13 @@ void init() {
     }
 }
 
-
 void attach(const vaddr_t fb) {
     // Make sure all mem_entry is page aligned, otherwise we get interlaced double vision
 
     le32 nr_entries = 0;
     mem::for_page_seg(fb, FB_SIZE, [&](vaddr_t vaddr, size_t len) {
-        attach_backing.entries[nr_entries++] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, vaddr)), static_cast<le32>(len), 0 };
+        attach_backing.entries[nr_entries++] = { static_cast<le64>(mem::to_paddr(proc::current->page_table, vaddr)),
+                                                 static_cast<le32>(len), 0 };
     });
 
     attach_backing.hdr = { { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, nr_entries };

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/ipc.h>
 #include <sys/misc.h>
 
 extern "C" void main(void) {
@@ -20,5 +21,5 @@ extern "C" void main(void) {
     sleep_ms(500);
     bool reply = false;
     int_pid reply_from = recv(&reply, 1, 3);
-    printf("proc-a: reply from pid %ld: %s\n", reply_from, reply? "OK": "Not OK");
+    printf("proc-a: reply from pid %ld: %s\n", reply_from, reply ? "OK" : "Not OK");
 }

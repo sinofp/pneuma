@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ipc.h>
 #include <sys/misc.h>
 
 namespace {
@@ -29,9 +30,6 @@ int readline(char *buf, int len) {
 } // namespace
 
 extern "C" void main(void) {
-    // Wait until libc-test finishes, as we now have interrupt-based disk IO
-    sleep_ms(50);
-
     for (;;) {
         printf("> ");
         char cmdline[128];
@@ -73,6 +71,8 @@ extern "C" void main(void) {
             fwrite(data, 1, len, f);
             fclose(f);
             printf("wrote %d bytes to %s\n", len, filename);
+        } else if (!strcmp(cmdline, "sleep")) {
+            sleep_ms(3'000);
         } else if (!strcmp(cmdline, "fault")) {
             auto p = reinterpret_cast<int *>(1234);
             *p = 5678;

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <sys/ipc.h>
 #include <sys/misc.h>
 #include <sys/syscall.h>
 

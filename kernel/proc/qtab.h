@@ -10,10 +10,11 @@ using qkey_t = int32_t;              // Use int for minus MINKEY TODO better app
 constexpr qkey_t MINKEY = INT32_MIN; // It doesn't have to be the smallest possible value, it only needs to be smaller
                                      // than the smallest valid value
 
-constexpr size_t NQUEUES = 2;                 // # of different queues (ready, sleep, etc.)
+constexpr size_t NQUEUES = 3;                 // # of different queues (ready, sleep, etc.)
 constexpr size_t NQENT = MAX + (NQUEUES * 2); // * 2 for head & tail
 constexpr id_t READY_QUEUE = MAX;
 constexpr id_t SLEEP_QUEUE = MAX + 2;
+constexpr id_t SEND_QUEUE = MAX + 4;
 
 struct qent {
     qkey_t key;
@@ -79,7 +80,7 @@ public:
     }
 };
 
-struct ready_queue_t : public queue_view {
+struct priority_queue_t : public queue_view {
     using queue_view::queue_view;
 
     inline optional<id_t> enqueue(id_t pid, qkey_t key) {
@@ -142,8 +143,10 @@ struct sleep_queue_t : public queue_view {
     }
 };
 
-constexpr auto ready_queue() { return ready_queue_t(READY_QUEUE); }
+constexpr auto ready_queue() { return priority_queue_t(READY_QUEUE); }
 
 constexpr auto sleep_queue() { return sleep_queue_t(SLEEP_QUEUE); }
+
+constexpr auto send_queue() { return priority_queue_t(SEND_QUEUE); }
 
 } // namespace proc

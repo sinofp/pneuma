@@ -183,11 +183,9 @@ paddr_t to_paddr(pt_t &root_table, vaddr_t vaddr) {
 void cross_proc_memcpy(pt_t &dst_pt, vaddr_t dst, pt_t &src_pt, vaddr_t src, size_t len) {
     size_t chunk;
     for (; 0 < len; src += chunk, dst += chunk, len -= chunk) {
-        chunk = min(len, min(PAGE_SIZE - (src & (PAGE_SIZE - 1)),
-                             PAGE_SIZE - (dst & (PAGE_SIZE - 1))));
+        chunk = min(len, min(PAGE_SIZE - (src & (PAGE_SIZE - 1)), PAGE_SIZE - (dst & (PAGE_SIZE - 1))));
         // All paddr is identically mapped, so no need to update page tables
-        memcpy(reinterpret_cast<void *>(to_paddr(dst_pt, dst)),
-               reinterpret_cast<void *>(to_paddr(src_pt, src)), chunk);
+        memcpy(reinterpret_cast<void *>(to_paddr(dst_pt, dst)), reinterpret_cast<void *>(to_paddr(src_pt, src)), chunk);
     }
 }
 

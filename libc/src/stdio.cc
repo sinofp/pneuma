@@ -1,9 +1,11 @@
-#include "ff.h"
+#include <ipc/fs.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>   // malloc
-#include <string.h>   // strlen
-#include <sys/stat.h> // mkdir
+#include <stdlib.h> // malloc
+#include <string.h> // strlen, strncpy, memcpy, memset
+#include <sys/ipc.h>
+#include <sys/misc.h>
+#include <sys/stat.h> // mode_t for mkdir
 #include <sys/syscall.h>
 
 // vaddr_t equivalent for user space
@@ -19,220 +21,147 @@ int getchar() { return syscall(SYS_GETCHAR, 0, 0, 0); }
 
 namespace {
 
-// FatFs state
-FATFS fatfs;
-bool mounted = false;
-
-// FIL pool for open files
-constexpr size_t MAX_OPEN_FILES = 16;
-FIL fil_pool[MAX_OPEN_FILES];
-bool fil_in_use[MAX_OPEN_FILES];
-
-FIL *alloc_fil() {
-    for (size_t i = 0; i < MAX_OPEN_FILES; ++i)
-        if (!fil_in_use[i]) {
-            fil_in_use[i] = true;
-            return &fil_pool[i];
-        }
-    return NULL;
-}
-
-void free_fil(FIL *f) {
-    for (size_t i = 0; i < MAX_OPEN_FILES; ++i)
-        if (&fil_pool[i] == f) {
-            fil_in_use[i] = false;
-            return;
-        }
-}
-
-bool ensure_mounted() {
-    if (mounted)
-        return true;
-
-    FRESULT res = f_mount(&fatfs, "", 1);
-    if (FR_OK != res) {
-        printf("fatfs: mount failed with error %d\n", res);
-        return false;
-    }
-    mounted = true;
-    return true;
-}
-
-BYTE mode_to_flags(const char *mode) {
-    if (nullptr == mode)
-        return 0;
-
-    bool read = false, write = false, append = false, create = false;
-
-    for (const char *p = mode; '\0' != *p; ++p) {
-        switch (*p) {
-        case 'r':
-            read = true;
-            break;
-        case 'w':
-            write = true;
-            create = true;
-            break;
-        case 'a':
-            write = true;
-            append = true;
-            create = true;
-            break;
-        case '+':
-            read = true;
-            write = true;
-            break;
-        }
-    }
-
-    BYTE flags = 0;
-    if (read and !write)
-        flags = FA_READ;
-    else if (!read and write)
-        flags = FA_WRITE;
-    else if (read and write)
-        flags = FA_READ | FA_WRITE;
-
-    if (create)
-        flags |= FA_CREATE_ALWAYS;
-    if (append)
-        flags |= FA_OPEN_APPEND;
-    if (read and !create and !append)
-        flags = FA_READ | FA_OPEN_EXISTING;
-
-    return flags;
-}
+int fs_fd(FILE *stream) { return static_cast<int>(reinterpret_cast<intptr_t>(stream)); }
 
 } // namespace
 
 // File operations
 
 FILE *fopen(const char *__restrict__ path, const char *__restrict__ mode) {
-    printf("fopen: %s\n", path);
     if (nullptr == path or nullptr == mode)
         return NULL;
-
-    if (!ensure_mounted())
-        return NULL;
-
-    auto *fil = alloc_fil();
-    if (nullptr == fil) {
-        printf("fopen: no free FIL handles\n");
-        return NULL;
-    }
-
-    BYTE flags = mode_to_flags(mode);
-    if (0 == flags) {
-        free_fil(fil);
-        return NULL;
-    }
-
-    FRESULT res = f_open(fil, path, flags);
-    if (FR_OK != res) {
-        free_fil(fil);
-        return NULL;
-    }
-
-    return reinterpret_cast<FILE *>(fil);
+    fs_req_open_t req{ FS_OP_OPEN };
+    strncpy(req.path, path, FS_MAX_PATH - 1);
+    strncpy(req.mode, mode, sizeof(req.mode) - 1);
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result < 1 ? NULL : reinterpret_cast<FILE *>(static_cast<intptr_t>(result));
 }
 
 int fclose(FILE *stream) {
     if (nullptr == stream)
         return EOF;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    FRESULT res = f_close(fil);
-    free_fil(fil);
-    return (FR_OK == res) ? 0 : EOF;
+    fs_req_fd_t req{ FS_OP_CLOSE, fs_fd(stream) };
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return (0 == result) ? 0 : EOF;
 }
 
 size_t fread(void *__restrict__ ptr, size_t size, size_t nmemb, FILE *__restrict__ stream) {
     if (nullptr == stream or nullptr == ptr or 0 == size or 0 == nmemb)
         return 0;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    UINT br;
-    FRESULT res = f_read(fil, ptr, size * nmemb, &br);
-
-    return (FR_OK == res) ? br / size : 0;
+    unsigned total = size * nmemb, done = 0;
+    auto *out = reinterpret_cast<char *>(ptr);
+    while (done < total) {
+        unsigned chunk = total - done;
+        if (FS_MAX_DATA < chunk)
+            chunk = FS_MAX_DATA;
+        fs_req_read_t req{ FS_OP_READ, fs_fd(stream), chunk };
+        ssend(&req, sizeof req, FILE_SERVER);
+        fs_resp_read_t resp;
+        recv(&resp, sizeof resp, FILE_SERVER);
+        if (resp.result < 0 or 0 == resp.size)
+            break;
+        memcpy(out + done, resp.data, resp.size);
+        done += resp.size;
+        if (resp.size < chunk)
+            break; // EOF
+    }
+    return done / size;
 }
 
 size_t fwrite(const void *__restrict__ ptr, size_t size, size_t nmemb, FILE *__restrict__ stream) {
     if (nullptr == stream or nullptr == ptr or 0 == size or 0 == nmemb)
         return 0;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    UINT bw;
-    FRESULT res = f_write(fil, ptr, size * nmemb, &bw);
-
-    return (FR_OK == res) ? bw / size : 0;
+    unsigned total = size * nmemb, done = 0;
+    const auto *in = reinterpret_cast<const char *>(ptr);
+    while (done < total) {
+        unsigned chunk = total - done;
+        if (FS_MAX_DATA < chunk)
+            chunk = FS_MAX_DATA;
+        fs_req_write_t req{ FS_OP_WRITE, fs_fd(stream), chunk };
+        memcpy(req.data, in + done, chunk);
+        ssend(&req, sizeof req, FILE_SERVER);
+        fs_resp_ok_t result;
+        recv(&result, sizeof result, FILE_SERVER);
+        if (result < 0)
+            break;
+        done += result;
+        if (static_cast<unsigned>(result) < chunk)
+            break;
+    }
+    return done / size;
 }
 
 int fseek(FILE *stream, long offset, int whence) {
     if (nullptr == stream)
         return -1;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    FSIZE_t new_pos;
-
-    switch (whence) {
-    case SEEK_SET:
-        new_pos = offset;
-        break;
-    case SEEK_CUR:
-        new_pos = f_tell(fil) + offset;
-        break;
-    case SEEK_END:
-        new_pos = f_size(fil) + offset;
-        break;
-    default:
-        return -1;
-    }
-
-    return (FR_OK == f_lseek(fil, new_pos)) ? 0 : -1;
+    fs_req_seek_t req{ FS_OP_SEEK, fs_fd(stream), offset, whence };
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result;
 }
 
 long ftell(FILE *stream) {
     if (nullptr == stream)
         return -1;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    return static_cast<long>(f_tell(fil));
+    fs_req_fd_t req{ FS_OP_TELL, fs_fd(stream) };
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return static_cast<long>(result);
 }
 
 int fflush(FILE *stream) {
     if (nullptr == stream)
         return EOF;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    return (FR_OK == f_sync(fil)) ? 0 : EOF;
+    fs_req_fd_t req{ FS_OP_FLUSH, fs_fd(stream) };
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return (0 == result) ? 0 : EOF;
 }
 
 int feof(FILE *stream) {
     if (nullptr == stream)
         return 0;
-
-    auto *fil = reinterpret_cast<FIL *>(stream);
-    return f_eof(fil) ? 1 : 0;
+    fs_req_fd_t req{ FS_OP_EOF, fs_fd(stream) };
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result;
 }
 
 int remove(const char *path) {
-    auto res = f_unlink(path);
-    // TODO set errno
-    return FR_OK == res ? 0 : -1;
+    fs_req_path_t req{ FS_OP_REMOVE };
+    strncpy(req.path, path, FS_MAX_PATH - 1);
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result;
 }
 
-int rename(const char *old, const char *_new) {
-    auto res = f_rename(old, _new);
-    // TODO set errno
-    return FR_OK == res ? 0 : -1;
+int rename(const char *old_path, const char *new_path) {
+    fs_req_rename_t req{ FS_OP_RENAME };
+    strncpy(req.path, old_path, FS_MAX_PATH - 1);
+    strncpy(req.path2, new_path, FS_MAX_PATH - 1);
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result;
 }
 
-// Techinically, it's not part of stdio (it's sys/stat), but I think it fits here
-int mkdir(const char *path, [[maybe_unused]] /* FAT after all */ mode_t mode) {
-    auto res = f_mkdir(path);
-    // TODO set errno
-    return FR_OK == res ? 0 : -1;
+// Technically not part of stdio (it's sys/stat), but it fits here
+int mkdir(const char *path, [[maybe_unused]] mode_t mode) {
+    fs_req_path_t req{ FS_OP_MKDIR };
+    strncpy(req.path, path, FS_MAX_PATH - 1);
+    ssend(&req, sizeof req, FILE_SERVER);
+    fs_resp_ok_t result;
+    recv(&result, sizeof result, FILE_SERVER);
+    return result;
 }
 
 int puts(const char *s) {

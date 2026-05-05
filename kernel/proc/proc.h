@@ -10,8 +10,11 @@ void init();
 void idle_loop();
 void backtrace();
 
-using id_t = intptr_t; // Signed, so it can convey error code. PTRSZ, so passing by register for syscall preserves signess
+using id_t =
+    intptr_t; // Signed, so it can convey error code. PTRSZ, so passing by register for syscall preserves signess
 constexpr id_t MAX = 8; // Maximum number of processes, for now
+
+constexpr id_t FILE_SERVER = 1;
 
 enum class state_t {
     UNUSED,

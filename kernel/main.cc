@@ -55,6 +55,11 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
     // Create user processes
+    // FS must be PID 1 for libc to work
+    auto *fs = proc::create({ _binary_fs_bin_start, reinterpret_cast<size_t>(_binary_fs_bin_size) });
+    proc::chprio(fs, proc::prio_t::V, false);
+    printf("Process created: fs (%d)\n", fs->pid);
+
     auto *libc_test =
         proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) });
     printf("Process created: libc-test (%d)\n", libc_test->pid);
@@ -74,12 +79,12 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         printf("Process created: doom (%d)\n", doom->pid);
     }
 
-    // proc::resume(shell, false);
+    proc::resume(fs, false);
+    proc::resume(libc_test, false);
+    proc::resume(shell, false);
     if (fdt::uninitialised != virtio::gpu::base) {
         proc::resume(doom, false);
     } else {
-        // proc::resume(libc_test);
-
         proc::resume(proc_b, false);
         proc::resume(proc_a, false);
     }
