@@ -1,7 +1,7 @@
 #include "mem/mem.h"
-#include "dev/virtio-blk.h"
-#include "dev/virtio-gpu.h"
-#include "dev/virtio-input.h"
+#include "dev/mmio.h"
+#include "dev/virtio.h"
+#include "fdt/fdt.h"
 #include "lib/span.h"
 
 namespace {
@@ -67,13 +67,16 @@ frame_stack free_stack;
 namespace mem {
 
 void init() {
-    // The virtq requiers more than one contiguous physical pages,
-    // while our alloc_frame + map_page is designed to allocate contiguous virtual pages.
-    // To forbid the usage of alloc_pages after we initilise the free stack, we allocate the virtq here.
+    // virtq requires multiple contiguous physical pages; alloc_frame is single-page only.
+    // Pre-reserve one virtq region per virtio device.
+    // Also cache device_id from MMIO since user drivers will need it
+    // and the syscall handler can't touch device MMIO after proc::create stops mapping it.
     constexpr auto virtq_pages = align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE;
-    virtio::blk::vq_paddr = alloc_pages(virtq_pages);
-    virtio::input::vq_paddr = alloc_pages(virtq_pages);
-    virtio::gpu::vq_paddr = alloc_pages(virtq_pages);
+    for (size_t i = 0; i < fdt::virtio_device_count; i++) {
+        fdt::virtio_devices[i].vq_paddr = alloc_pages(virtq_pages);
+        fdt::virtio_devices[i].device_id =
+            mmio::read<uint32_t>(fdt::virtio_devices[i].mmio_base, virtio::REG_DEVICE_ID);
+    }
 
     auto base = bump_paddr;
     auto total_bytes = free_ram_end - base;

@@ -5,7 +5,6 @@
 #include "proc/proc.h"
 
 namespace virtio::gpu {
-paddr_t vq_paddr;
 paddr_t base = fdt::uninitialised;
 uint32_t irq = fdt::uninitialised;
 } // namespace virtio::gpu
@@ -126,6 +125,7 @@ namespace virtio::gpu {
 void init() {
     printf("virtio-gpu: Found %ld virtio devices\n", static_cast<long>(fdt::virtio_device_count));
 
+    paddr_t vq_paddr = 0;
     for (size_t i = 0; i < fdt::virtio_device_count; i++) {
         auto mmio_base = fdt::virtio_devices[i].mmio_base;
 
@@ -140,6 +140,7 @@ void init() {
         // Assume we have at most one GPU
         base = mmio_base;
         irq = fdt::virtio_devices[i].irq;
+        vq_paddr = fdt::virtio_devices[i].vq_paddr;
 
         printf("virtio-gpu: Selected device at MMIO=0x%lx, IRQ=%d\n", static_cast<unsigned long>(base),
                static_cast<int>(irq));

@@ -9,7 +9,9 @@ constexpr size_t MAX_VIRTIO_DEVICES = 8;
 
 struct virtio_device {
     paddr_t mmio_base;
+    paddr_t vq_paddr; // pre-reserved virtq region; populated by mem::init
     uint32_t irq;
+    uint32_t device_id; // cached from MMIO at init time
 };
 
 struct header;

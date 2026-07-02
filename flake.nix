@@ -205,6 +205,8 @@
           libcCxxSources = findFiles ./libc/src ".cc";
           libcCSources = findFiles ./libc/src ".c";
           libcHeaders = findFiles ./libc/include ".h";
+          # Shared user-space driver headers (virtio, IPC protocols). Not part of libc.
+          driverHeaders = findFiles ./driver ".h";
           userPrograms = builtins.filter (p: !lib.hasSuffix "doomgeneric_rv.c" (toString p)) (
             (findFiles ./user ".cc") ++ (findFiles ./user ".c")
           );
@@ -230,6 +232,15 @@
             in
             lib.removePrefix libcIncludeDir pathStr;
 
+          # Get relative path within driver/ directory
+          driverRelPath =
+            path:
+            let
+              pathStr = toString path;
+              driverDir = toString ./driver + "/";
+            in
+            lib.removePrefix driverDir pathStr;
+
           # Get relative path within libc/src directory
           libcSrcRelPath =
             path:
@@ -241,7 +252,7 @@
 
           # Compiler flags for each architecture
           mkFlags =
-            arch: includeDir:
+            arch: includeDir: driverDir:
             let
               cfg = archConfigs.${arch};
               pie = if arch == "riscv64" then "-fPIE" else "";
@@ -250,20 +261,20 @@
             in
             {
               # Kernel C++ flags
-              kernel = "-std=c++2c ${common} -fno-exceptions -I kernel";
+              kernel = "-std=c++2c ${common} -fno-exceptions -I kernel -isystem ${driverDir}";
               # User C++ flags
-              cxx = "-std=c++2c ${common} -fno-exceptions -nostdlibinc -isystem ${includeDir}";
+              cxx = "-std=c++2c ${common} -fno-exceptions -nostdlibinc -isystem ${includeDir} -isystem ${driverDir}";
               # User C flags
-              c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir}";
+              c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir} -isystem ${driverDir}";
               # FatFs C flags (relaxed warnings for third-party code)
-              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -Wno-unused-parameter";
+              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -isystem ${driverDir} -Wno-unused-parameter";
             };
 
           # Build libc + FatFs for a specific architecture
           mkLibc =
             arch:
             let
-              flags = mkFlags arch "include";
+              flags = mkFlags arch "include" "driver";
             in
             pkgs.runCommand "libc-${arch}"
               {
@@ -285,6 +296,20 @@
                     cp ${path} include/${relPath}
                   ''
                 ) libcHeaders}
+
+                # Copy shared driver headers (virtio + IPC protocols)
+                mkdir -p driver
+                ${lib.concatMapStringsSep "\n" (
+                  path:
+                  let
+                    relPath = driverRelPath path;
+                    dir = builtins.dirOf relPath;
+                  in
+                  ''
+                    mkdir -p driver/${dir}
+                    cp ${path} driver/${relPath}
+                  ''
+                ) driverHeaders}
 
                 # Copy libc sources
                 mkdir -p src
@@ -343,6 +368,7 @@
 
                 # Also copy headers and linker script for user programs
                 cp -r include $out/include
+                cp -r driver $out/driver
                 cp ${./user/user.ld} $out/user.ld
 
                 # Export FatFs headers for the file server (user/fs.cc)
@@ -356,7 +382,7 @@
             let
               cfg = archConfigs.${arch};
               libc = mkLibc arch;
-              flags = mkFlags arch "${libc}/include";
+              flags = mkFlags arch "${libc}/include" "${libc}/driver";
 
               # Doom-specific flags (relaxed warnings for third-party code)
               # Use -nostdinc to disable all built-in includes, then add our headers first,
@@ -451,7 +477,7 @@
             let
               cfg = archConfigs.${arch};
               libc = mkLibc arch;
-              flags = mkFlags arch "${libc}/include";
+              flags = mkFlags arch "${libc}/include" "${libc}/driver";
               doom = mkDoom arch;
 
               # List all libc object files
@@ -584,7 +610,7 @@
           mkCompileCommands =
             arch:
             let
-              flags = mkFlags arch "libc/include";
+              flags = mkFlags arch "libc/include" "driver";
 
               # Generate entries for kernel sources
               kernelEntries = map (src: {

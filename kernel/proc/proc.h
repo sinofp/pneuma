@@ -48,6 +48,7 @@ struct process {
     union {
         id_t sender;
         id_t recipient;
+        uint32_t awaited_irq; // when SUSPENDED via sys_irq_wait
     };
 };
 

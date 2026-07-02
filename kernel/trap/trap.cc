@@ -1,12 +1,12 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
-#include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
 #include "dev/virtio-input.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
 #include "trap/csr.h"
+#include "trap/driver.h"
 #include "trap/plic.h"
 
 namespace {
@@ -203,52 +203,9 @@ void handle_syscall(trap::frame *f) {
         proc::current->state = proc::state_t::UNUSED;
         proc::reschedule();
         PANIC("unreachable");
-    case SYS_DISK_READ:
-    case SYS_DISK_WRITE: {
-        if (proc::FILE_SERVER != proc::current->pid)
-            return;
-        size_t sector = f->a0;
-        auto *buf = reinterpret_cast<char *>(f->a1);
-
-        // Validate sector is within disk capacity
-        if (sector >= virtio::blk::capacity) {
-            printf("disk: sector %lld out of range (capacity: %lld)\n", sector, virtio::blk::capacity);
-            f->a0 = static_cast<xlen_t>(-1);
-            break;
-        }
-
-        // Validate user buffer address
-        if (reinterpret_cast<vaddr_t>(buf) < proc::USER_BASE) {
-            printf("disk: invalid buffer address 0x%lx\n", f->a1);
-            f->a0 = static_cast<xlen_t>(-1);
-            break;
-        }
-
-        int is_write = (SYS_DISK_WRITE == f->a3) ? 1 : 0;
-        virtio::blk::read_write(buf, sector, is_write);
-        f->a0 = 0; // Success
-    } break;
     case SYS_SLEEP:
         proc::sleep_ms(f->a0);
         break;
-    case SYS_DISK_IOCTL: {
-        if (proc::FILE_SERVER != proc::current->pid)
-            return;
-        switch (f->a0) {
-        case DISK_IOCTL_GET_SECTOR_COUNT:
-            f->a0 = static_cast<xlen_t>(virtio::blk::capacity);
-            break;
-        case DISK_IOCTL_GET_SECTOR_SIZE:
-            f->a0 = 512; // Standard sector size
-            break;
-        case DISK_IOCTL_GET_BLOCK_SIZE:
-            f->a0 = 1; // Block erase granularity in sectors
-            break;
-        default:
-            f->a0 = static_cast<xlen_t>(-1);
-            break;
-        }
-    } break;
     case SYS_GET_TICKS:
         f->a0 = csr::time::read_ms();
         break;
@@ -270,6 +227,18 @@ void handle_syscall(trap::frame *f) {
     case SYS_MP_RECV:
         // printf("\n\n\nRecv(addr=%p, addr[0]=%d, sender=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0), f->a2);
         f->a0 = static_cast<xlen_t>(proc::message_passing({ reinterpret_cast<uint8_t *>(f->a0), f->a1 }, f->a2, false));
+        break;
+    case SYS_FDT_VIRTIO:
+        f->a0 = driver::sys_fdt_virtio(f->a0, f->a1);
+        break;
+    case SYS_MMIO_MAP:
+        f->a0 = driver::sys_mmio_map(f->a0, f->a1);
+        break;
+    case SYS_DMA_ALLOC:
+        f->a0 = driver::sys_dma_alloc(f->a0);
+        break;
+    case SYS_IRQ_WAIT:
+        f->a0 = driver::sys_irq_wait(static_cast<uint32_t>(f->a0));
         break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
@@ -310,13 +279,18 @@ extern "C" void handle_trap(trap::frame *f) {
     case SExternalIntr: {
         // External interrupt from PLIC
         if (const auto irq = plic::claim(0)) {
-            if (irq == virtio::blk::irq)
-                virtio::blk::handle_interrupt();
-            else if (irq == virtio::input::irq)
+            if (auto pid = driver::owner(irq); 0 <= pid) {
+                // User-space driver owns this IRQ. Mark pending and wake if it's blocked
+                // on sys_irq_wait. plic::complete is deferred until the driver's next call.
+                driver::mark_pending(irq);
+                driver::wake_if_waiting(&proc::procs[pid], irq);
+            } else if (irq == virtio::input::irq) {
                 virtio::input::handle_interrupt();
-            else
+                plic::complete(0, irq);
+            } else {
                 printf("Unexpected IRQ: %d\n", irq);
-            plic::complete(0, irq);
+                plic::complete(0, irq);
+            }
         }
         break;
     }

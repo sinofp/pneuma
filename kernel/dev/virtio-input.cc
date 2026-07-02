@@ -5,7 +5,6 @@
 #include "trap/plic.h"
 
 namespace virtio::input {
-paddr_t vq_paddr;
 paddr_t base = fdt::uninitialised;
 uint32_t irq = fdt::uninitialised;
 } // namespace virtio::input
@@ -24,6 +23,7 @@ namespace virtio::input {
 
 void init() {
     // TODO extract these enumerations
+    paddr_t vq_paddr = 0;
     for (size_t i = 0; i < fdt::virtio_device_count; i++) {
         auto mmio_base = fdt::virtio_devices[i].mmio_base;
 
@@ -38,6 +38,7 @@ void init() {
         // Assume we have at most one keyboard & mouse
         base = mmio_base;
         irq = fdt::virtio_devices[i].irq;
+        vq_paddr = fdt::virtio_devices[i].vq_paddr;
         plic::enable_irq(irq);
 
         printf("virtio-input: Selected device at MMIO=0x%lx, IRQ=%d\n", static_cast<unsigned long>(base),

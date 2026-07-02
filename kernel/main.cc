@@ -1,4 +1,3 @@
-#include "dev/virtio-blk.h"
 #include "dev/virtio-gpu.h"
 #include "dev/virtio-input.h"
 #include "fdt/fdt.h"
@@ -27,14 +26,8 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     proc::init();
     printf("Process created: idle (%d)\n", proc::current->pid);
 
-    // This will trigger yield when dealing PLIC interrupt, which access idle_proc->table
-    // Therefore it must be placed after idle_proc = create_process, otherwise we'll have
-    // Store/AMO Access Fault: scause=0x0000000000000007, stval=0x0000000000000008, sepc=0x0000000080200f2e
-    virtio::blk::init();
-    // Idle was created before blk::init() set base, so its page table lacks the MMIO mapping.
-    // Add it now so interrupt handlers can access virtio MMIO while idle is current.
-    mem::map_page(proc::current->page_table, virtio::blk::base, virtio::blk::base,
-                  mem::pte_t::flag::R | mem::pte_t::flag::W);
+    // virtio-blk now runs as a user-space driver (user/virtio-blk.cc, PID BLK_SERVER);
+    // kernel no longer maps its MMIO or handles its IRQ directly.
 
     virtio::input::init();
     mem::map_page(proc::current->page_table, virtio::input::base, virtio::input::base,
@@ -55,10 +48,15 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
     // Create user processes
-    // FS must be PID 1 for libc to work
+    // FS must be PID 1 for libc to work; virtio-blk must be PID 2 (matches BLK_SERVER in ipc/blk.h).
     auto *fs = proc::create({ _binary_fs_bin_start, reinterpret_cast<size_t>(_binary_fs_bin_size) });
     proc::chprio(fs, proc::prio_t::V, false);
     printf("Process created: fs (%d)\n", fs->pid);
+
+    auto *virtio_blk =
+        proc::create({ _binary_virtio_blk_bin_start, reinterpret_cast<size_t>(_binary_virtio_blk_bin_size) });
+    proc::chprio(virtio_blk, proc::prio_t::V, false);
+    printf("Process created: virtio-blk (%d)\n", virtio_blk->pid);
 
     auto *libc_test =
         proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) });
@@ -79,6 +77,7 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         printf("Process created: doom (%d)\n", doom->pid);
     }
 
+    proc::resume(virtio_blk, false);
     proc::resume(fs, false);
     proc::resume(libc_test, false);
     proc::resume(shell, false);

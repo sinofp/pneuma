@@ -14,7 +14,6 @@ void init();
 void handle_interrupt();
 bool dequeue(event &out);
 
-extern paddr_t vq_paddr; // allocated by mem::init
 extern paddr_t base;
 extern uint32_t irq;
 
