@@ -18,6 +18,7 @@ constexpr size_t PAGE_SIZE = 4096;
 constexpr size_t REG_MAGIC = 0x00;
 constexpr size_t REG_VERSION = 0x04;
 constexpr size_t REG_DEVICE_ID = 0x08;
+constexpr size_t REG_GUEST_PAGE_SIZE = 0x28;
 constexpr size_t REG_QUEUE_SEL = 0x30;
 constexpr size_t REG_QUEUE_NUM_MAX = 0x34;
 constexpr size_t REG_QUEUE_NUM = 0x38;

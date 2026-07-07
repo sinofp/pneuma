@@ -87,7 +87,7 @@ bool probe_and_setup() {
 
     mmio_base = reinterpret_cast<unsigned long>(mmio_map(devs[best].mmio_base, 1));
 
-    vq = init(mmio_base, devs[best].vq_paddr, false);
+    vq = init(mmio_base, devs[best].vq_paddr);
 
     vq->avail.flags |= AVAIL_F_NO_INTERRUPT;
 

@@ -23,7 +23,7 @@ template <typename T> inline void mmio_fetch_and_or(unsigned long base, size_t o
     mmio_write<T>(base, off, mmio_read<T>(base, off) | bits);
 }
 
-inline virtq *init(unsigned long mmio_base, unsigned long vq_paddr, bool shifted_pfn /* for U-Boot */) {
+inline virtq *init(unsigned long mmio_base, unsigned long vq_paddr) {
     auto *vq = static_cast<virtq *>(mmio_map(vq_paddr, 2));
     memset(vq, 0, sizeof(virtq));
 
@@ -35,9 +35,12 @@ inline virtq *init(unsigned long mmio_base, unsigned long vq_paddr, bool shifted
     // Must happen after FEAT_OK and before DRIVER_OK.
     // The device_status=0 reset above zeroes queue state, so PFN/NUM/ALIGN must be written now.
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_SEL, 0);
+    // GuestPageSize must be written explicitly: QEMU's guest_page_shift survives the reset
+    // above, so whatever a previous driver (e.g. U-Boot) set would otherwise still apply.
+    mmio_write<uint32_t>(mmio_base, REG_GUEST_PAGE_SIZE, PAGE_SIZE);
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_NUM, ENTRY_NUM);
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_ALIGN, PAGE_SIZE);
-    mmio_write<uint32_t>(mmio_base, REG_QUEUE_PFN, shifted_pfn ? (vq_paddr >> 12) : vq_paddr);
+    mmio_write<uint32_t>(mmio_base, REG_QUEUE_PFN, vq_paddr / PAGE_SIZE);
 
     mmio_fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER_OK);
     return vq;
@@ -76,12 +79,14 @@ inline bool is_busy(virtq *vq) {
     return vq->last_used_index != vq->used.index;
 }
 
-// Spin until the outstanding request completes. Polling drivers (gpu) use this instead of IRQ.
-inline void wait_done(virtq *vq) {
-    while (is_busy(vq)) {
-        asm volatile("" ::
-                         : "memory");
-    }
+// Spin for polling drivers until the outstanding request completes.
+// Returns false if no answer, so the high prio driver won't starve other apps.
+inline bool wait_done(virtq *vq) {
+    constexpr uint32_t max_spins = 100'000'000;
+    for (uint32_t spins = 0; spins < max_spins; spins++)
+        if (!is_busy(vq))
+            return true;
+    return false;
 }
 
 } // namespace virtio

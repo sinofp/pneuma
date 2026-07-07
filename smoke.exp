@@ -1,0 +1,48 @@
+#!/usr/bin/env expect
+
+set timeout 120
+
+proc must {pattern} {
+    expect {
+        -exact $pattern {}
+        timeout { puts "\nsmoke: TIMEOUT waiting for \"$pattern\""; exit 1 }
+        eof { puts "\nsmoke: unexpected EOF waiting for \"$pattern\""; exit 1 }
+    }
+}
+
+set has_gpu [expr {"--gpu" in $argv}]
+
+spawn ./run {*}$argv
+
+# Kernel boot lines print before user procs run, so they arrive unmangled.
+must "Process created: libc-test (5)"
+must "Process created: a (6)"
+must "Process created: b (7)"
+must "Process created: shell (8)"
+
+# DOOM or proc-a&b
+if {$has_gpu} {
+    must "Process created: doom (9)"
+    must "I_InitGraphics: Auto-scaling factor: "
+} else {
+    must "proc-a: reply from pid 7: OK"
+}
+
+# Shell tests
+send "\r"
+must "> "
+
+send "hello\r"
+must "Hello world from shell!"
+must "> "
+
+send "cat\r"
+must "filename> "
+send "hello.txt\r"
+must "Hello from FAT filesystem!"
+must "> "
+
+# C-a x quits QEMU's -nographic mux
+send "\x01x"
+expect eof
+puts "smoke: OK"

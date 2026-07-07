@@ -44,15 +44,13 @@ bool probe_and_setup() {
     virtio_dev_t devs[8];
     auto n = fdt_virtio(devs, sizeof(devs) / sizeof(devs[0]));
 
-    size_t blk_device_count = 0;
     size_t best = static_cast<size_t>(-1);
     uint64_t best_cap = 0;
 
-    // First pass: count blk devices (drives the shifted_pfn heuristic) and find biggest by capacity (likely disk.tar).
+    // Find the biggest device by capacity (likely the data disk; the U-Boot boot disk is smaller).
     for (size_t i = 0; i < n; i++) {
         if (BLK_DEVICE_ID != devs[i].device_id)
             continue;
-        ++blk_device_count;
 
         auto regs = reinterpret_cast<unsigned long>(mmio_map(devs[i].mmio_base, 1));
         if (!regs)
@@ -78,12 +76,11 @@ bool probe_and_setup() {
         return false;
     }
 
-    bool shifted_pfn = (blk_device_count >= 2);
     mmio_base = reinterpret_cast<unsigned long>(mmio_map(devs[best].mmio_base, 1));
     irq = devs[best].irq;
     capacity_sectors = best_cap;
 
-    vq = init(mmio_base, devs[best].vq_paddr, shifted_pfn);
+    vq = init(mmio_base, devs[best].vq_paddr);
 
     // Single-page DMA scratch for the device-facing req_t.
     static_assert(sizeof(req_t) <= PAGE_SIZE, "req_t exceeds one page");
@@ -98,8 +95,8 @@ bool probe_and_setup() {
         return false;
     }
 
-    printf("virtio-blk(user): selected MMIO=%p irq=%d capacity=%ld bytes (blk_devs=%d shifted_pfn=%d)\n",
-           devs[best].mmio_base, irq, best_cap * BLK_SECTOR_BYTES, blk_device_count, shifted_pfn);
+    printf("virtio-blk(user): selected MMIO=%p irq=%d capacity=%ld bytes\n", devs[best].mmio_base, irq,
+           best_cap * BLK_SECTOR_BYTES);
     return true;
 }
 

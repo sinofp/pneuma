@@ -1,0 +1,35 @@
+#!/usr/bin/env zsh
+
+# Run smoke.exp across every supported arch/flag combination and print a pass/fail summary.
+
+set -u
+
+local -a bases=(rv32 rv64 "rv64 --uboot")
+local -a configs
+local base gpu
+for base in $bases; {
+    for gpu in "" "--gpu"; {
+        configs+=("${base}${gpu:+ $gpu}")
+    }
+}
+
+local -a passed failed
+local cfg
+for cfg in $configs; {
+    print -n "matrix: ${(r:20:)cfg}"
+    if { ./smoke.exp ${(z)cfg} >/dev/null 2>&1 } {
+        print "PASS"
+        passed+=$cfg
+    } else {
+        print "FAIL"
+        failed+=$cfg
+    }
+}
+
+print "\nmatrix: ${#passed}/${#configs} passed"
+if (( ${#failed} )) {
+    print "matrix: FAILED configs:"
+    print -l -- "  - "${^failed}
+    exit 1
+}
+print "matrix: OK"

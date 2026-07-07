@@ -183,28 +183,16 @@ public:
 
 namespace time {
 inline auto read() {
-    if constexpr (__riscv_xlen == 32) {
-        uint32_t hi1, lo, hi2;
-        do {
-            asm volatile("rdtimeh %0"
-                         : "=r"(hi1));
-            asm volatile("rdtime %0"
-                         : "=r"(lo));
-            asm volatile("rdtimeh %0"
-                         : "=r"(hi2));
-        } while (hi1 != hi2); // Retry if overflow during read
-        return (static_cast<uint64_t>(hi2) << 32) | lo;
-    } else {
-        uint64_t t;
-        asm volatile("rdtime %0"
-                     : "=r"(t));
-        return t;
-    }
+    xlen_t t;
+    // In theory, RV32 should use rdtimeh for the full 64bit precision.
+    // But it causes trouble for later division, and DG_GetTicksMs returns 32bit.
+    asm volatile("rdtime %0"
+                 : "=r"(t));
+    return t;
 }
 
 inline auto read_ms() { return read() / fdt::clk_freq_ms; }
 
-inline auto read_us() { return read() / fdt::clk_freq_us; }
 } // namespace time
 
 class intr_guard {

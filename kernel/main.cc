@@ -26,11 +26,14 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
-    // Create user servers. Ordering is fixed in their header files:
+    // Create user servers and apps relying on fixed pid.
     //   PID 1 = fs
     //   PID 2 = virtio-blk
     //   PID 3 = virtio-input
     //   PID 4 = virtio-gpu
+    //   PID 5 = libc-test (for smoke.exp)
+    //   PID 6 = proc-a
+    //   PID 7 = proc-b
     auto *fs = proc::create({ _binary_fs_bin_start, reinterpret_cast<size_t>(_binary_fs_bin_size) });
     proc::chprio(fs, proc::prio_t::V, false);
     printf("Process created: fs (%d)\n", fs->pid);
@@ -45,14 +48,12 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     proc::chprio(virtio_input, proc::prio_t::V, false);
     printf("Process created: virtio-input (%d)\n", virtio_input->pid);
 
-    proc::process *virtio_gpu = nullptr;
     const bool has_gpu = fdt::has_device_id(16);
-    if (has_gpu) {
-        virtio_gpu =
-            proc::create({ _binary_virtio_gpu_bin_start, reinterpret_cast<size_t>(_binary_virtio_gpu_bin_size) });
-        proc::chprio(virtio_gpu, proc::prio_t::V, false);
-        printf("Process created: virtio-gpu (%d)\n", virtio_gpu->pid);
-    }
+    // Create virtio-gpu regardless has gpu or not, so later apps have fixed pid
+    auto *virtio_gpu =
+        proc::create({ _binary_virtio_gpu_bin_start, reinterpret_cast<size_t>(_binary_virtio_gpu_bin_size) });
+    proc::chprio(virtio_gpu, proc::prio_t::V, false);
+    printf("Process created: virtio-gpu (%d)\n", virtio_gpu->pid);
 
     auto *libc_test =
         proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) });
@@ -75,12 +76,11 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
 
     proc::resume(virtio_blk, false);
     proc::resume(virtio_input, false);
-    if (has_gpu)
-        proc::resume(virtio_gpu, false);
     proc::resume(fs, false);
     proc::resume(libc_test, false);
     proc::resume(shell, false);
     if (has_gpu) {
+        proc::resume(virtio_gpu, false);
         proc::resume(doom, false);
     } else {
         proc::resume(proc_b, false);

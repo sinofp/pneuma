@@ -109,6 +109,7 @@ virtq *controlq;
 scratch_t *scratch;
 unsigned long scratch_paddr;
 rect display;
+bool dead; // set on first command timeout; all later requests fail fast
 
 // paddr helper for command structs
 #define SCRATCH_PADDR(field) (scratch_paddr + offsetof(scratch_t, field))
@@ -141,7 +142,7 @@ bool probe_and_setup() {
 
     mmio_base = reinterpret_cast<unsigned long>(mmio_map(devs[best].mmio_base, 1));
 
-    controlq = init(mmio_base, devs[best].vq_paddr, false);
+    controlq = init(mmio_base, devs[best].vq_paddr);
 
     // We use polling
     controlq->avail.flags |= AVAIL_F_NO_INTERRUPT;
@@ -155,7 +156,10 @@ bool probe_and_setup() {
 }
 
 // 2-descriptor: [cmd | resp], and wait for done
-void submit(unsigned long cmd_paddr, size_t cmd_len) {
+int submit(unsigned long cmd_paddr, size_t cmd_len) {
+    if (dead)
+        return -1;
+
     controlq->descs[0].addr = cmd_paddr;
     controlq->descs[0].len = cmd_len;
     controlq->descs[0].flags = DESC_F_NEXT;
@@ -167,7 +171,12 @@ void submit(unsigned long cmd_paddr, size_t cmd_len) {
     controlq->descs[1].next = 0;
 
     kick(mmio_base, controlq, 0, 0);
-    wait_done(controlq);
+    if (!wait_done(controlq)) {
+        printf("virtio-gpu(user): command timed out; marking device dead\n");
+        dead = true;
+        return -1;
+    }
+    return 0;
 }
 
 int attach(const gpu_req_t &req) {
@@ -178,7 +187,8 @@ int attach(const gpu_req_t &req) {
     scratch->create_2d = {
         { CMD_RESOURCE_CREATE_2D }, RESOURCE_ID, FORMAT_B8G8R8A8_UNORM, display.width, display.height
     };
-    submit(SCRATCH_PADDR(create_2d), sizeof(resource_create_2d));
+    if (submit(SCRATCH_PADDR(create_2d), sizeof(resource_create_2d)))
+        return -1;
 
     // Reconstruct virtio-gpu mem_entry[] from (paddrs, head_off, total_len). The first entry
     // absorbs any intra-page head offset; subsequent entries start on a page boundary. The
@@ -194,22 +204,20 @@ int attach(const gpu_req_t &req) {
 
     scratch->attach_hdr = { { CMD_RESOURCE_ATTACH_BACKING }, RESOURCE_ID, req.nr_pages };
     // The attach_backing command is header + entries[] as a single contiguous struct sequence.
-    submit(SCRATCH_PADDR(attach_hdr), sizeof(resource_attach_backing) + req.nr_pages * sizeof(mem_entry));
+    if (submit(SCRATCH_PADDR(attach_hdr), sizeof(resource_attach_backing) + req.nr_pages * sizeof(mem_entry)))
+        return -1;
 
     scratch->scanout = { { CMD_SET_SCANOUT }, display, 0, RESOURCE_ID };
-    submit(SCRATCH_PADDR(scanout), sizeof(set_scanout));
-
-    return 0;
+    return submit(SCRATCH_PADDR(scanout), sizeof(set_scanout));
 }
 
 int flush() {
     scratch->transfer = { { CMD_TRANSFER_TO_HOST_2D }, display, 0, RESOURCE_ID, 0 };
-    submit(SCRATCH_PADDR(transfer), sizeof(transfer_to_host_2d));
+    if (submit(SCRATCH_PADDR(transfer), sizeof(transfer_to_host_2d)))
+        return -1;
 
     scratch->flush_cmd = { { CMD_RESOURCE_FLUSH }, display, RESOURCE_ID, 0 };
-    submit(SCRATCH_PADDR(flush_cmd), sizeof(resource_flush));
-
-    return 0;
+    return submit(SCRATCH_PADDR(flush_cmd), sizeof(resource_flush));
 }
 
 } // namespace

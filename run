@@ -45,8 +45,8 @@ while (( $# > 0 )) {
             shift
             ;;
         (*)
-            echo "Error: Unknown argument '$1'"
-            echo "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu]"
+            print "Error: Unknown argument '$1'"
+            print "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu]"
             exit 1
             ;;
     }
@@ -65,7 +65,7 @@ case $arch {
         ;;
 }
 
-echo "Building for ${arch:u}..."
+print "Building for ${arch:u}..."
 
 # OpenSBI firmware path
 local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
@@ -81,21 +81,21 @@ local b_elf=result-$arch/b.elf
 
 # U-Boot is only available for RV64
 if [[ $use_uboot == true && $arch != rv64 ]] {
-    echo "Error: U-Boot boot is only supported for rv64"
+    print "Error: U-Boot boot is only supported for rv64"
     exit 1
 }
 
 # Check if U-Boot binary exists
 if [[ $use_uboot == true && ! -f $UBOOT_QEMU ]] {
-    echo "Error: U-Boot binary not found at $UBOOT_QEMU"
-    echo "Make sure you're running inside 'nix develop'"
+    print "Error: U-Boot binary not found at $UBOOT_QEMU"
+    print "Make sure you're running inside 'nix develop'"
     exit 1
 }
 
 # Prepare boot configuration
 local qemu_kernel
 if [[ $use_uboot == true ]] {
-    echo "Boot chain: OpenSBI (M-mode) → U-Boot (S-mode) → Kernel (S-mode)"
+    print "Boot chain: OpenSBI (M-mode) → U-Boot (S-mode) → Kernel (S-mode)"
     qemu_kernel=$UBOOT_QEMU
 } else {
     qemu_kernel=$kernel_elf
@@ -112,9 +112,9 @@ cp result-$arch/disk.img $disk_img
 chmod +w $disk_img
 
 # Inject any local files from disk/ that aren't tracked by git (e.g. large game assets)
-for f in disk/*(.); do
+for f in disk/*(.); {
     mcopy -i $disk_img -o $f ::${f:t}
-done
+}
 
 # Assign virtio-mmio bus slots in order of device registration
 local virtio_bus=0
@@ -128,7 +128,7 @@ keyboard_args="-device virtio-keyboard-device,bus=virtio-mmio-bus.$((virtio_bus+
 # Create boot disk for U-Boot if needed
 if [[ $use_uboot == true ]] {
     local boot_img=boot-${arch}.img
-    echo "Creating boot disk image: $boot_img"
+    print "Creating boot disk image: $boot_img"
 
     # Create disk image and format as FAT32 (whole-disk, no partition table)
     dd if=/dev/zero of=$boot_img bs=1M count=16 2>/dev/null
@@ -168,7 +168,7 @@ if [[ $use_dts == true && $use_uboot == true ]] {
     } | $qemu ${(z)qemu_common_args} 2>&1 \
         | awk '/fdt print/{found=1;next} found && /reset/{exit} found{print}' \
 	> $uboot_dts
-    echo "Wrote $uboot_dts"
+    print "Wrote $uboot_dts"
     exit
 }
 
@@ -178,18 +178,18 @@ if [[ $use_dts == true && $use_uboot == false ]] {
     $qemu ${(z)qemu_common_args} >/dev/null 2>&1 || true
     dtc -I dtb -O dts -o $dts virt-${arch}.dtb
     rm -f virt-${arch}.dtb
-    echo "Wrote $dts"
+    print "Wrote $dts"
     exit
 }
 
 if [[ $use_uboot == true && $debug == false ]] {
-    echo "Running ${arch:u} via OpenSBI + U-Boot..."
+    print "Running ${arch:u} via OpenSBI + U-Boot..."
 
     # TODO Running expect catches C-a prefix for QEMU
     ./uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
 
 } elif [[ $debug == true ]] {
-    echo "Starting QEMU (${arch:u}) with GDB server on port 1234"
+    print "Starting QEMU (${arch:u}) with GDB server on port 1234"
 
     # Get the compilation directory from debug info for source mapping
     local kernel_comp_dir=$(llvm-dwarfdump $kernel_elf | grep DW_AT_comp_dir | head -1 | sed -E 's|.*"(.*)".*|\1|')
@@ -228,10 +228,10 @@ if [[ $use_uboot == true && $debug == false ]] {
         "
     }
 
-    echo "Source mapping: $kernel_comp_dir -> $PWD"
+    print "Source mapping: $kernel_comp_dir -> $PWD"
 
     # Split pane and start debugger
-    echo "Splitting terminal and starting $debugger_name..."
+    print "Splitting terminal and starting $debugger_name..."
     ~/dotfiles/bin/term/split --down --percent 62 --command "$debugger_cmd"
 
     # Wait for QEMU to finish
@@ -240,9 +240,9 @@ if [[ $use_uboot == true && $debug == false ]] {
 } else {
     # Start QEMU normally
     if [[ $use_uboot == true ]] {
-        echo "Running ${arch:u} via U-Boot..."
+        print "Running ${arch:u} via U-Boot..."
     } else {
-        echo "Running ${arch:u} kernel..."
+        print "Running ${arch:u} kernel..."
     }
     $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
 }

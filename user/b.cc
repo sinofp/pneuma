@@ -3,16 +3,15 @@
 #include <sys/misc.h>
 
 extern "C" void main(void) {
-    for (int i = 0; i < 200; ++i) {
-        // for (;;) {
+    for (int i = 0; i < 10; ++i) {
         putchar('B');
-        sleep_ms(1);
+        sleep_ms(20);
     }
 
-    static constexpr int MSG_SIZE = 9000;
+    static constexpr int MSG_SIZE = 4097;
     static char buf[MSG_SIZE];
 
-    int_pid sender = recv(buf, MSG_SIZE, ANY_SOURCE);
+    auto sender = recv(buf, MSG_SIZE, ANY_SOURCE);
 
     bool ok = true;
     for (int i = 0; i < MSG_SIZE; ++i)
@@ -24,6 +23,7 @@ extern "C" void main(void) {
 
     printf("recv from pid %ld: %s\n", sender, ok ? "OK" : "FAIL");
 
-    int_pid reply_result = ssend(&ok, 1, 2);
+    int_pid pid_a = 6;
+    auto reply_result = ssend(&ok, 1, pid_a);
     printf("proc-b: ssend reply result %ld\n", reply_result);
 }
