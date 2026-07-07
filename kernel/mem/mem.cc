@@ -1,8 +1,8 @@
 #include "mem/mem.h"
 #include "dev/mmio.h"
-#include "dev/virtio.h"
 #include "fdt/fdt.h"
 #include "lib/span.h"
+#include <virtio.h>
 
 namespace {
 using mem::PAGE_SIZE;

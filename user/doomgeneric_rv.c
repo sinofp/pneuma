@@ -1,10 +1,15 @@
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include "m_fixed.h"
+#include <ipc/gpu.h>
+#include <ipc/input.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/ipc.h>
 #include <sys/misc.h>
 #include <sys/syscall.h>
+#include <syscalls.h>
 
 // Use double to fake Doom 16.16 fixed-point to replace 64-bit int divison on RV32
 fixed_t FixedMul(fixed_t a, fixed_t b) { return (fixed_t) ((double) a * b / FRACUNIT); }
@@ -17,10 +22,29 @@ fixed_t FixedDiv(fixed_t a, fixed_t b) {
 
 void DG_Init(void) {
     // DG_ScreenBuffer is defined and allocated in doomgeneric.c
-    syscall(SYS_GPU_ATTACH, (unsigned long) DG_ScreenBuffer, 0, 0);
+    const unsigned long fb_vaddr = (unsigned long) DG_ScreenBuffer;
+    const size_t fb_len = DOOMGENERIC_RESX * DOOMGENERIC_RESY * sizeof(uint32_t);
+
+    gpu_req_t req = { 0 };
+    req.op = GPU_OP_ATTACH;
+    req.width = DOOMGENERIC_RESX;
+    req.height = DOOMGENERIC_RESY;
+    req.head_off = fb_vaddr & 0xFFF; // PAGE_SIZE - 1
+    req.nr_pages = page_walk(fb_vaddr, fb_len, req.paddrs);
+
+    const size_t send_bytes = offsetof(gpu_req_t, paddrs) + req.nr_pages * sizeof(uint64_t);
+    ssend(&req, send_bytes, GPU_SERVER);
+    gpu_resp_t resp;
+    recv(&resp, sizeof resp, GPU_SERVER);
 }
 
-void DG_DrawFrame(void) { syscall(SYS_GPU_FLUSH, 0, 0, 0); }
+void DG_DrawFrame(void) {
+    gpu_req_t req = { 0 };
+    req.op = GPU_OP_FLUSH;
+    ssend(&req, offsetof(gpu_req_t, paddrs), GPU_SERVER);
+    gpu_resp_t resp;
+    recv(&resp, sizeof resp, GPU_SERVER);
+}
 
 void DG_SleepMs(uint32_t ms) { sleep_ms(ms); }
 
@@ -94,15 +118,17 @@ static unsigned char toDoomKey(unsigned int code) {
 }
 
 int DG_GetKey(int *pressed, unsigned char *doomKey) {
-    struct input_event ev;
-    if (!syscall(SYS_GET_INPUT, (unsigned long) &ev, 0, 0))
+    input_req_t req = { .op = INPUT_OP_GET };
+    ssend(&req, sizeof req, INPUT_SERVER);
+    input_resp_t resp;
+    recv(&resp, sizeof resp, INPUT_SERVER);
+    if (!resp.has_event)
         return 0;
     // TODO translate mouse left/right to arrow keys
-    if (ev.type != 1) // not EV_KEY; consume without reporting
+    if (resp.type != 1) // not EV_KEY; consume without reporting
         return 0;
-    *pressed = ev.value;
-    *doomKey = toDoomKey(ev.code);
-    // printf("key: code=%d doom=0x%x pressed=%d\n", ev.code, *doomKey, *pressed);
+    *pressed = resp.value;
+    *doomKey = toDoomKey(resp.code);
     return 1;
 }
 

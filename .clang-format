@@ -8,3 +8,4 @@ BreakAfterAttributes: Always
 BreakBeforeInlineASMColon: Always
 AlignEscapedNewlines: LeftWithLastLine
 SeparateDefinitionBlocks: Always
+AlignConsecutiveMacros: AcrossEmptyLinesAndComments

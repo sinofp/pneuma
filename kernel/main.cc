@@ -1,5 +1,3 @@
-#include "dev/virtio-gpu.h"
-#include "dev/virtio-input.h"
 #include "fdt/fdt.h"
 #include "lib/symbols.h"
 #include "mem/mem.h"
@@ -26,29 +24,13 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     proc::init();
     printf("Process created: idle (%d)\n", proc::current->pid);
 
-    // virtio-blk now runs as a user-space driver (user/virtio-blk.cc, PID BLK_SERVER);
-    // kernel no longer maps its MMIO or handles its IRQ directly.
-
-    virtio::input::init();
-    mem::map_page(proc::current->page_table, virtio::input::base, virtio::input::base,
-                  mem::pte_t::flag::R | mem::pte_t::flag::W);
-
-    virtio::gpu::init();
-    if (fdt::uninitialised != virtio::gpu::base) {
-        mem::map_page(proc::current->page_table, virtio::gpu::base, virtio::gpu::base,
-                      mem::pte_t::flag::R | mem::pte_t::flag::W);
-
-        // static uint32_t fb[320 * 200];
-        // for (auto &px : fb)
-        //     px = 0xFF; // BGRA: blue
-        // virtio::gpu::attach(reinterpret_cast<vaddr_t>(fb));
-        // virtio::gpu::flush();
-    }
-
     printf("USER_BASE is %p\n", reinterpret_cast<void *>(proc::USER_BASE));
 
-    // Create user processes
-    // FS must be PID 1 for libc to work; virtio-blk must be PID 2 (matches BLK_SERVER in ipc/blk.h).
+    // Create user servers. Ordering is fixed in their header files:
+    //   PID 1 = fs
+    //   PID 2 = virtio-blk
+    //   PID 3 = virtio-input
+    //   PID 4 = virtio-gpu
     auto *fs = proc::create({ _binary_fs_bin_start, reinterpret_cast<size_t>(_binary_fs_bin_size) });
     proc::chprio(fs, proc::prio_t::V, false);
     printf("Process created: fs (%d)\n", fs->pid);
@@ -57,6 +39,20 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         proc::create({ _binary_virtio_blk_bin_start, reinterpret_cast<size_t>(_binary_virtio_blk_bin_size) });
     proc::chprio(virtio_blk, proc::prio_t::V, false);
     printf("Process created: virtio-blk (%d)\n", virtio_blk->pid);
+
+    auto *virtio_input =
+        proc::create({ _binary_virtio_input_bin_start, reinterpret_cast<size_t>(_binary_virtio_input_bin_size) });
+    proc::chprio(virtio_input, proc::prio_t::V, false);
+    printf("Process created: virtio-input (%d)\n", virtio_input->pid);
+
+    proc::process *virtio_gpu = nullptr;
+    const bool has_gpu = fdt::has_device_id(16);
+    if (has_gpu) {
+        virtio_gpu =
+            proc::create({ _binary_virtio_gpu_bin_start, reinterpret_cast<size_t>(_binary_virtio_gpu_bin_size) });
+        proc::chprio(virtio_gpu, proc::prio_t::V, false);
+        printf("Process created: virtio-gpu (%d)\n", virtio_gpu->pid);
+    }
 
     auto *libc_test =
         proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) });
@@ -71,17 +67,20 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     auto *shell = proc::create({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
 
-    proc::process *doom;
-    if (fdt::uninitialised != virtio::gpu::base) {
+    proc::process *doom = nullptr;
+    if (has_gpu) {
         doom = proc::create({ _binary_doom_bin_start, reinterpret_cast<size_t>(_binary_doom_bin_size) });
         printf("Process created: doom (%d)\n", doom->pid);
     }
 
     proc::resume(virtio_blk, false);
+    proc::resume(virtio_input, false);
+    if (has_gpu)
+        proc::resume(virtio_gpu, false);
     proc::resume(fs, false);
     proc::resume(libc_test, false);
     proc::resume(shell, false);
-    if (fdt::uninitialised != virtio::gpu::base) {
+    if (has_gpu) {
         proc::resume(doom, false);
     } else {
         proc::resume(proc_b, false);

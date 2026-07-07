@@ -22,8 +22,8 @@ using paddr_t = uintptr_t;
 // Architecture-specific load/store instructions for inline assembly
 #if __riscv_xlen == 32
 #define STORE "sw"
-#define LOAD "lw"
+#define LOAD  "lw"
 #else
 #define STORE "sd"
-#define LOAD "ld"
+#define LOAD  "ld"
 #endif

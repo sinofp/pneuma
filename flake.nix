@@ -208,7 +208,7 @@
           # Shared user-space driver headers (virtio, IPC protocols). Not part of libc.
           driverHeaders = findFiles ./driver ".h";
           userPrograms = builtins.filter (p: !lib.hasSuffix "doomgeneric_rv.c" (toString p)) (
-            (findFiles ./user ".cc") ++ (findFiles ./user ".c")
+            (findFiles ./user ".cc") ++ (findFiles ./user ".c") ++ (findFiles ./driver ".cc")
           );
 
           # Helper to get just the filename from a path
@@ -425,7 +425,7 @@
                 echo "Clang resource dir: $CLANG_RESOURCE_DIR"
 
                 # Full doom flags: our headers first (-I), then clang builtins (-isystem, searched after -I)
-                DOOM_FLAGS="${doomFlagsBase} -I${libc}/include -isystem $CLANG_RESOURCE_DIR"
+                DOOM_FLAGS="${doomFlagsBase} -I${libc}/include -isystem ${libc}/driver -isystem $CLANG_RESOURCE_DIR"
 
                 # Copy doomgeneric sources to working directory
                 mkdir -p doomgeneric
@@ -633,18 +633,18 @@
                 file = "libc/src/${libcSrcRelPath src}";
               }) libcCSources;
 
-              # Generate entries for user programs
+              # Generate entries for user programs (live in user/ or driver/)
               userEntries = map (
                 src:
                 let
-                  file = basename src;
+                  file = lib.removePrefix (toString ./. + "/") (toString src);
                   isC = lib.hasSuffix ".c" file;
                   progFlags = if isC then flags.c else flags.cxx;
                 in
                 {
                   directory = ".";
-                  command = "${clang} ${progFlags} -c user/${file}";
-                  file = "user/${file}";
+                  command = "${clang} ${progFlags} -c ${file}";
+                  file = file;
                 }
               ) userPrograms;
 

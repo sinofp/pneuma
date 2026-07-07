@@ -18,7 +18,9 @@ void wake_if_waiting(proc::process *p, uint32_t irq);
 xlen_t sys_fdt_virtio(vaddr_t user_buf, size_t max);
 xlen_t sys_mmio_map(paddr_t paddr, size_t npages);
 xlen_t sys_dma_alloc(size_t npages);
+xlen_t sys_irq_claim(uint32_t irq);
 xlen_t sys_irq_wait(uint32_t irq);
+xlen_t sys_page_walk(vaddr_t vaddr, size_t len, vaddr_t paddrs_out);
 
 // TODO: release_owned(pid) on SYS_EXIT once drivers can exit; current drivers are long-lived.
 

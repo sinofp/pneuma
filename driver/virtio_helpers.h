@@ -6,6 +6,8 @@
 #include "virtio.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <syscalls.h>
 
 namespace virtio {
 
@@ -17,42 +19,28 @@ template <typename T> inline void mmio_write(unsigned long base, size_t off, T v
     *reinterpret_cast<volatile T *>(base + off) = val;
 }
 
-inline void mmio_or_u32(unsigned long base, size_t off, uint32_t bits) {
-    mmio_write<uint32_t>(base, off, mmio_read<uint32_t>(base, off) | bits);
+template <typename T> inline void mmio_fetch_and_or(unsigned long base, size_t off, T bits) {
+    mmio_write<T>(base, off, mmio_read<T>(base, off) | bits);
 }
 
-// Steps 1-5 of the virtio device-init dance. Caller follows up with setup_queue + finish_device.
-inline void setup_device(unsigned long mmio_base) {
-    // 1. Reset the device.
+inline virtq *init(unsigned long mmio_base, unsigned long vq_paddr, bool shifted_pfn /* for U-Boot */) {
+    auto *vq = static_cast<virtq *>(mmio_map(vq_paddr, 2));
+    memset(vq, 0, sizeof(virtq));
+
     mmio_write<uint32_t>(mmio_base, REG_DEVICE_STATUS, 0);
-    // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-    mmio_or_u32(mmio_base, REG_DEVICE_STATUS, STATUS_ACK);
-    // 3. Set the DRIVER status bit.
-    mmio_or_u32(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER);
-    // 5. Set the FEATURES_OK status bit.
-    mmio_or_u32(mmio_base, REG_DEVICE_STATUS, STATUS_FEAT_OK);
-}
+    mmio_fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_ACK);
+    mmio_fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER);
+    mmio_fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_FEAT_OK);
 
-// Wire one virtq to the device at `index`. `shifted_pfn` selects QEMU's two-mode behaviour:
-// raw paddr on direct boot, paddr>>12 when booted via U-Boot.
-inline void setup_queue(unsigned long mmio_base, unsigned long vq_paddr, bool shifted_pfn, uint32_t index) {
-    // 1. Select the queue writing its index (first queue is 0) to QueueSel.
-    mmio_write<uint32_t>(mmio_base, REG_QUEUE_SEL, index);
-    // 5. Notify the device about the queue size by writing the size to QueueNum.
+    // Must happen after FEAT_OK and before DRIVER_OK.
+    // The device_status=0 reset above zeroes queue state, so PFN/NUM/ALIGN must be written now.
+    mmio_write<uint32_t>(mmio_base, REG_QUEUE_SEL, 0);
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_NUM, ENTRY_NUM);
-    // 6. Notify the device about the used alignment by writing its value in bytes to QueueAlign.
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_ALIGN, PAGE_SIZE);
-    // 7. Write the physical number of the first page of the queue to the QueuePFN register.
-    // QEMU interprets this differently depending on whether U-Boot was used:
-    // - Direct boot: expects raw physical address
-    // - U-Boot boot: expects page frame number (paddr >> 12)
-    // TODO find out why the behaviour is different and unify it
     mmio_write<uint32_t>(mmio_base, REG_QUEUE_PFN, shifted_pfn ? (vq_paddr >> 12) : vq_paddr);
-}
 
-inline void finish_device(unsigned long regs) {
-    // 8. Set the DRIVER_OK status bit.
-    mmio_or_u32(regs, REG_DEVICE_STATUS, STATUS_DRIVER_OK);
+    mmio_fetch_and_or<uint32_t>(mmio_base, REG_DEVICE_STATUS, STATUS_DRIVER_OK);
+    return vq;
 }
 
 // Publish a chain head and notify the device.
@@ -80,6 +68,20 @@ inline void kick(unsigned long mmio_base, virtq *vq, uint16_t desc_index, uint32
 inline void ack(unsigned long regs) {
     auto status = mmio_read<uint32_t>(regs, REG_INTERRUPT_STATUS);
     mmio_write<uint32_t>(regs, REG_INTERRUPT_ACK, status);
+}
+
+// True while the driver's last kick hasn't been reflected in used.index yet.
+inline bool is_busy(virtq *vq) {
+    __sync_synchronize();
+    return vq->last_used_index != vq->used.index;
+}
+
+// Spin until the outstanding request completes. Polling drivers (gpu) use this instead of IRQ.
+inline void wait_done(virtq *vq) {
+    while (is_busy(vq)) {
+        asm volatile("" ::
+                         : "memory");
+    }
 }
 
 } // namespace virtio

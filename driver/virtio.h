@@ -8,6 +8,10 @@
 
 namespace virtio {
 
+using le16 = uint16_t;
+using le32 = uint32_t;
+using le64 = uint64_t;
+
 constexpr size_t PAGE_SIZE = 4096;
 
 // MMIO register offsets

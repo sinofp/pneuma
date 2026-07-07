@@ -64,8 +64,8 @@ bool probe_and_setup() {
 
         // Capacity in sectors lives in config space.
         auto cap_sectors = mmio_read<uint64_t>(regs, REG_DEVICE_CONFIG + 0);
-        printf("virtio-blk(user): candidate %u MMIO=0x%lx irq=%u capacity=%lu sectors\n", static_cast<unsigned>(i),
-               devs[i].mmio_base, devs[i].irq, static_cast<unsigned long>(cap_sectors));
+        printf("virtio-blk(user): candidate %d: MMIO=%p irq=%d capacity=%ld sectors\n", i, devs[i].mmio_base,
+               devs[i].irq, cap_sectors);
 
         if (best_cap < cap_sectors) {
             best_cap = cap_sectors;
@@ -83,32 +83,30 @@ bool probe_and_setup() {
     irq = devs[best].irq;
     capacity_sectors = best_cap;
 
-    // virtq region was pre-reserved by mem::init (2 contiguous physical pages).
-    vq = static_cast<virtq *>(mmio_map(devs[best].vq_paddr, 2));
-    memset(vq, 0, sizeof(virtq));
+    vq = init(mmio_base, devs[best].vq_paddr, shifted_pfn);
 
     // Single-page DMA scratch for the device-facing req_t.
     static_assert(sizeof(req_t) <= PAGE_SIZE, "req_t exceeds one page");
     req_paddr = dma_alloc_page();
     req = reinterpret_cast<req_t *>(req_paddr);
 
-    setup_device(mmio_base);
-    setup_queue(mmio_base, devs[best].vq_paddr, shifted_pfn, 0);
-    finish_device(mmio_base);
-
     // Disable interrupt suppression in the virtqueue
     vq->avail.flags &= ~AVAIL_F_NO_INTERRUPT;
 
-    printf("virtio-blk(user): selected MMIO=0x%lx irq=%u capacity=%lu bytes (blk_devs=%lu shifted_pfn=%d)\n",
-           devs[best].mmio_base, irq, static_cast<unsigned long>(best_cap * BLK_SECTOR_BYTES),
-           static_cast<unsigned long>(blk_device_count), static_cast<int>(shifted_pfn));
+    if (irq_claim(irq) < 0) {
+        printf("virtio-blk(user): irq %d already claimed\n", irq);
+        return false;
+    }
+
+    printf("virtio-blk(user): selected MMIO=%p irq=%d capacity=%ld bytes (blk_devs=%d shifted_pfn=%d)\n",
+           devs[best].mmio_base, irq, best_cap * BLK_SECTOR_BYTES, blk_device_count, shifted_pfn);
     return true;
 }
 
 int read_write(void *buf, uint64_t sector, bool is_write) {
     if (sector >= capacity_sectors) {
-        printf("virtio: tried to read/write sector=%ld, but capacity is %ld\n", static_cast<unsigned long>(sector),
-               static_cast<unsigned long>(capacity_sectors));
+        printf("virtio-blk(user): tried to read/write sector=%ld, but capacity is %ld sectors\n",
+               static_cast<unsigned long>(sector), static_cast<unsigned long>(capacity_sectors));
         return -1;
     }
 
@@ -136,7 +134,10 @@ int read_write(void *buf, uint64_t sector, bool is_write) {
 
     // Notify the device that there is a new request.
     kick(mmio_base, vq, 0);
-    irq_wait(irq);
+    // Wait on the used ring, not on IRQ delivery: a stale pending flag (IRQ claimed while we
+    // were still running) makes irq_wait return before this request's completion.
+    while (is_busy(vq))
+        irq_wait(irq);
     ack(mmio_base);
 
     // Resumed by interrupt and rescheduling, check if the operation succeeded
@@ -168,7 +169,8 @@ int flush() {
     vq->descs[1].flags = DESC_F_WRITE; // end of chain (no DESC_F_NEXT)
 
     kick(mmio_base, vq, 0);
-    irq_wait(irq);
+    while (is_busy(vq))
+        irq_wait(irq);
     ack(mmio_base);
 
     if (0 != req->status) {

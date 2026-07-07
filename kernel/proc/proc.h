@@ -12,7 +12,7 @@ void backtrace();
 
 using id_t =
     intptr_t; // Signed, so it can convey error code. PTRSZ, so passing by register for syscall preserves signess
-constexpr id_t MAX = 8; // Maximum number of processes, for now
+constexpr id_t MAX = 12; // Maximum number of processes, for now
 
 constexpr id_t FILE_SERVER = 1;
 

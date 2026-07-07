@@ -1,7 +1,5 @@
 #include "proc/proc.h"
 #include "dev/sbi.h"
-#include "dev/virtio-gpu.h"
-#include "dev/virtio-input.h"
 #include "fdt/fdt.h"
 #include "lib/debug.h"
 #include "mem/mem.h"
@@ -141,15 +139,6 @@ process *create(span<const uint8_t> image) {
     for (vaddr_t kaddr = reinterpret_cast<vaddr_t>(__kernel_base); kaddr < static_cast<vaddr_t>(free_ram_end);
          kaddr += mem::PAGE_SIZE)
         mem::map_page(page_table, kaddr, kaddr, R | W | X);
-
-    // All virtio-mmio have 0x00001000 size, so it's sufficient to map only one page to access their registers
-    // Map virtio-input MMIO (kernel driver). blk MMIO is no longer mapped here; user virtio-blk
-    // maps it on demand via SYS_MMIO_MAP. Skip on idle proc because it's created before *::init().
-    if (fdt::uninitialised != virtio::input::base)
-        mem::map_page(page_table, virtio::input::base, virtio::input::base, R | W);
-    // We might not even have GPU
-    if (fdt::uninitialised != virtio::gpu::base)
-        mem::map_page(page_table, virtio::gpu::base, virtio::gpu::base, R | W);
 
     // Map PLIC MMIO TODO skip Hart 0 M-Mode ranges
     for (paddr_t plic_addr = plic::start_addr; plic_addr < plic::end_addr; plic_addr += mem::PAGE_SIZE)

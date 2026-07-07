@@ -2,12 +2,12 @@
 
 #include "lib/types.h"
 
-#define va_list __builtin_va_list
-#define va_start __builtin_va_start
-#define va_end __builtin_va_end
-#define va_arg __builtin_va_arg
+#define va_list                  __builtin_va_list
+#define va_start                 __builtin_va_start
+#define va_end                   __builtin_va_end
+#define va_arg                   __builtin_va_arg
 
-#define align_up(value, align) __builtin_align_up(value, align)
+#define align_up(value, align)   __builtin_align_up(value, align)
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
 // TODO concept?
@@ -38,15 +38,14 @@ constexpr unsigned long SYS_GETCHAR = 2;
 constexpr unsigned long SYS_EXIT = 3;
 constexpr unsigned long SYS_SLEEP = 6;
 constexpr unsigned long SYS_GET_TICKS = 8;
-constexpr unsigned long SYS_GPU_ATTACH = 9;
-constexpr unsigned long SYS_GPU_FLUSH = 10;
-constexpr unsigned long SYS_GET_INPUT = 11;
 constexpr unsigned long SYS_MP_SSEND = 12;
 constexpr unsigned long SYS_MP_RECV = 13;
 constexpr unsigned long SYS_FDT_VIRTIO = 14;
 constexpr unsigned long SYS_MMIO_MAP = 15;
 constexpr unsigned long SYS_DMA_ALLOC = 16;
 constexpr unsigned long SYS_IRQ_WAIT = 17;
+constexpr unsigned long SYS_PAGE_WALK = 18;
+constexpr unsigned long SYS_IRQ_CLAIM = 19;
 
 constexpr int EOF = -1;
 

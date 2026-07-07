@@ -1,7 +1,5 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
-#include "dev/virtio-gpu.h"
-#include "dev/virtio-input.h"
 #include "lib/debug.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
@@ -209,16 +207,6 @@ void handle_syscall(trap::frame *f) {
     case SYS_GET_TICKS:
         f->a0 = csr::time::read_ms();
         break;
-    case SYS_GPU_ATTACH:
-        virtio::gpu::attach(f->a0);
-        break;
-    case SYS_GPU_FLUSH:
-        virtio::gpu::flush();
-        break;
-    case SYS_GET_INPUT: {
-        using namespace virtio::input;
-        f->a0 = dequeue(*reinterpret_cast<event *>(f->a0));
-    } break;
     case SYS_MP_SSEND:
         // printf("\n\n\nSsend(addr=%p, addr[0]=%d, recipient=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0),
         // f->a2);
@@ -237,8 +225,14 @@ void handle_syscall(trap::frame *f) {
     case SYS_DMA_ALLOC:
         f->a0 = driver::sys_dma_alloc(f->a0);
         break;
+    case SYS_IRQ_CLAIM:
+        f->a0 = driver::sys_irq_claim(static_cast<uint32_t>(f->a0));
+        break;
     case SYS_IRQ_WAIT:
         f->a0 = driver::sys_irq_wait(static_cast<uint32_t>(f->a0));
+        break;
+    case SYS_PAGE_WALK:
+        f->a0 = driver::sys_page_walk(f->a0, f->a1, f->a2);
         break;
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
@@ -277,16 +271,12 @@ extern "C" void handle_trap(trap::frame *f) {
         }
     } break;
     case SExternalIntr: {
-        // External interrupt from PLIC
+        // External interrupt from PLIC. All virtio IRQs are owned by user-space drivers now:
+        // mark pending, wake the owner if it's blocked, defer plic::complete to the owner's next wait call.
         if (const auto irq = plic::claim(0)) {
             if (auto pid = driver::owner(irq); 0 <= pid) {
-                // User-space driver owns this IRQ. Mark pending and wake if it's blocked
-                // on sys_irq_wait. plic::complete is deferred until the driver's next call.
                 driver::mark_pending(irq);
                 driver::wake_if_waiting(&proc::procs[pid], irq);
-            } else if (irq == virtio::input::irq) {
-                virtio::input::handle_interrupt();
-                plic::complete(0, irq);
             } else {
                 printf("Unexpected IRQ: %d\n", irq);
                 plic::complete(0, irq);
