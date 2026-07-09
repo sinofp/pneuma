@@ -6,17 +6,19 @@ set -u
 
 local -a bases=(rv32 rv64 "rv64 --uboot")
 local -a configs
-local base gpu
+local base gpu smp
 for base in $bases; {
     for gpu in "" "--gpu"; {
-        configs+=("${base}${gpu:+ $gpu}")
+        for smp in "" "--smp 5"; {
+            configs+=("${base}${gpu:+ $gpu}${smp:+ $smp}")
+        }
     }
 }
 
 local -a passed failed
 local cfg
 for cfg in $configs; {
-    print -n "matrix: ${(r:20:)cfg}"
+    print -n "matrix: ${(r:30:)cfg}"
     if { ./smoke.exp ${(z)cfg} >/dev/null 2>&1 } {
         print "PASS"
         passed+=$cfg

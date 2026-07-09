@@ -118,7 +118,7 @@ void backtrace() {
     printf_unlocked(")\n    llvm-symbolizer --obj=result-rv64/kernel.elf $addr\n```\n");
 }
 
-process *create(span<const uint8_t> image) {
+process *create(span<const uint8_t> image, bool allocate_heap) {
     // bkl covers the slot scan and every alloc_frame below. Only called at boot today, but
     // uncontended acquisition is cheap and mem::alloc_frame asserts the lock is held.
     csr::intr_guard ig;
@@ -173,10 +173,12 @@ process *create(span<const uint8_t> image) {
         mem::map_page(page_table, USER_BASE + offset, page, U | R | W | X);
     }
 
-    // Map user heap pages (hard coded 8MB for now)
-    vaddr_t heap_base = align_up(USER_BASE + image.size(), mem::PAGE_SIZE);
-    for (auto offset = 0uz; offset < 8 * 1024 * 1024; offset += mem::PAGE_SIZE)
-        mem::map_page(page_table, heap_base + offset, mem::alloc_frame(), U | R | W | X);
+    // Map user heap pages 'on demand' to save space
+    if (allocate_heap) {
+        vaddr_t heap_base = align_up(USER_BASE + image.size(), mem::PAGE_SIZE);
+        for (auto offset = 0uz; offset < 8 * 1024 * 1024; offset += mem::PAGE_SIZE)
+            mem::map_page(page_table, heap_base + offset, mem::alloc_frame(), U | R | W | X);
+    }
 
     // Initialize fields.
     // Can't construct and swap because the uint8_t stack[];
@@ -267,6 +269,20 @@ namespace proc {
 void ready(process *proc, lock::guard &) {
     proc->state = READY;
     proc::ready_queue().enqueue(proc->pid, static_cast<qkey_t>(proc->prio));
+
+    // Kick a hart running lower prio (probably idle), skipping the quantum for it to reschedule.
+    size_t target = hart::MAX;
+    auto lowest = proc->prio;
+    for (size_t h = 0; h < hart::MAX; h++) {
+        if (hart::id() == h or nullptr == currents[h])
+            continue;
+        if (currents[h]->prio < lowest) {
+            lowest = currents[h]->prio;
+            target = h;
+        }
+    }
+    if (hart::MAX != target)
+        sbi::send_ipi(static_cast<xlen_t>(1) << target, 0);
 }
 
 void ready(process *proc) {
@@ -314,14 +330,17 @@ void timer_tick(int64_t elapsed_ms, bool preempt_due) {
     lock::guard g{ lock::bkl };
 
     bool woke = false;
-    auto sleepq = proc::sleep_queue();
-    if (!sleepq.empty()) {
-        sleepq.first_key() -= elapsed_ms;
-        while (!sleepq.empty() and sleepq.first_key() <= 0) {
-            // Given that the queue is nonempty, dequeue must have value
-            // TODO unify the argument/return value: use either pid or procs
-            ready(&procs[sleepq.dequeue().value()], g);
-            woke = true;
+    // Only the primary hart ticks the sleep queue
+    if (hart::primary == hart::id()) {
+        auto sleepq = proc::sleep_queue();
+        if (!sleepq.empty()) {
+            sleepq.first_key() -= elapsed_ms;
+            while (!sleepq.empty() and sleepq.first_key() <= 0) {
+                // Given that the queue is nonempty, dequeue must have value
+                // TODO unify the argument/return value: use either pid or procs
+                ready(&procs[sleepq.dequeue().value()], g);
+                woke = true;
+            }
         }
     }
 
@@ -451,7 +470,6 @@ void reschedule(lock::guard &g) {
         prev->page_table = {};
         prev->state = UNUSED;
     }
-
 
     g.disarm();
     switch_context(&prev->sp, next->sp, &lock::bkl.locked, &lock::bkl.holder);

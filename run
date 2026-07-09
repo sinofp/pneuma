@@ -5,13 +5,14 @@
 set -ue
 
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu]
+# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]
 local arch=rv32
 local debug=false
 local use_gdb=false
 local use_uboot=false
 local use_dts=false
 local use_gpu=false
+local smp=1
 
 # Parse arguments
 while (( $# > 0 )) {
@@ -44,9 +45,13 @@ while (( $# > 0 )) {
             use_gpu=true
             shift
             ;;
+        (--smp)
+            smp=$2
+            shift 2
+            ;;
         (*)
             print "Error: Unknown argument '$1'"
-            print "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu]"
+            print "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]"
             exit 1
             ;;
     }
@@ -152,7 +157,7 @@ if [[ $use_gpu == true ]] {
     nographic_arg="--no-reboot -serial mon:stdio"
 }
 
-local qemu_common_args="-machine $qemu_machine \
+local qemu_common_args="-machine $qemu_machine -smp $smp \
       -bios $opensbi_fw -kernel $qemu_kernel \
       $nographic_arg \
       $data_disk_args $keyboard_args \

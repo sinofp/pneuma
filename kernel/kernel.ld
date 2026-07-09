@@ -26,7 +26,10 @@ SECTIONS {
     . = ALIGN(4);
     __image_end = .;
 
-    . += 128 * 1024; /* 128KB */
+    /* One 128 KB boot stack per hart (pairs with hart::MAX and boot()'s hartid<<17 offset):
+       hart h's stack top is __stack_top - h * 128K, so hart 0 owns the topmost slot. */
+    . = ALIGN(16);
+    . += 5 * 128 * 1024;
     __stack_top = .;
 
     . = ALIGN(4096);

@@ -4,6 +4,7 @@
 
 namespace trap {
 void init();
+void init_secondary();    // per-hart stvec + SSIE|STIE; no PLIC, no SEIE
 void enable_timer_intr(); // arm the one-shot timer + sstatus.SIE; call after proc::init
 
 struct [[gnu::packed]] frame {

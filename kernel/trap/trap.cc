@@ -187,9 +187,13 @@ namespace {
 
 void handle_syscall(trap::frame *f) {
     switch (f->a3) {
-    case SYS_PUTCHAR:
+    case SYS_PUTCHAR: {
+        // TODO create a SYS_PUTS.
+        // Currently the console log only make sure kernel printf don't interleave with user
+        lock::guard g{ lock::console };
         putchar(f->a0);
         break;
+    }
     case SYS_GETCHAR:
         for (;;) {
             long ch = getchar();
@@ -324,7 +328,8 @@ extern "C" void handle_trap(trap::frame *f) {
 
 namespace trap {
 
-constexpr void (*kernel_entries[])(){ kernel_entry<0>, kernel_entry<1>, kernel_entry<2>, kernel_entry<3>, kernel_entry<4> };
+constexpr void (*kernel_entries[])(){ kernel_entry<0>, kernel_entry<1>, kernel_entry<2>, kernel_entry<3>,
+                                      kernel_entry<4> };
 static_assert(hart::MAX == sizeof(kernel_entries) / sizeof(kernel_entries[0]),
               "one kernel_entry instantiation per hart");
 
@@ -342,6 +347,16 @@ void init() {
     // Enable supervisor software (IPI), timer, and external interrupt sources; delivery stays
     // off until enable_timer_intr() sets sstatus.SIE, after the scheduler structures exist.
     sie::read().set(sie_enc::SSIE).set(sie_enc::STIE).set(sie_enc::SEIE).write();
+}
+
+void init_secondary() {
+    using namespace csr;
+
+    stvec{ kernel_entries[hart::id()], stvec::Mode::Direct }.write();
+
+    // IPIs and our own timer only. No SEIE and no plic::init: external interrupts are the
+    // primary hart's business.
+    sie::read().set(sie_enc::SSIE).set(sie_enc::STIE).write();
 }
 
 void enable_timer_intr() {

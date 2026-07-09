@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mem/pagetable.h"
 #include "lib/lock.h"
+#include "mem/pagetable.h"
 
 namespace mem {
 void init();

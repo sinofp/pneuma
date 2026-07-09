@@ -11,6 +11,7 @@ proc must {pattern} {
 }
 
 set has_gpu [expr {"--gpu" in $argv}]
+set is_smp [expr {"--smp" in $argv}]
 
 spawn ./run {*}$argv
 
@@ -19,13 +20,32 @@ must "Process created: libc-test (5)"
 must "Process created: a (6)"
 must "Process created: b (7)"
 must "Process created: shell (8)"
+if {$has_gpu} {
+    must "Process created: doom (9)"
+}
+
+if {$is_smp} {
+    # --smp 5: boot lottery picks one primary (random id); the other 4 harts
+    # come up as secondaries. Count them id-agnostically.
+    for {set i 0} {$i < 4} {incr i} {
+        expect {
+            -re {hart [0-9]+ up} {}
+            timeout { puts "\nsmoke: TIMEOUT waiting for secondary harts"; exit 1 }
+            eof     { puts "\nsmoke: EOF waiting for secondary harts"; exit 1 }
+        }
+    }
+}
 
 # DOOM or proc-a&b
 if {$has_gpu} {
-    must "Process created: doom (9)"
     must "I_InitGraphics: Auto-scaling factor: "
 } else {
-    must "proc-a: reply from pid 7: OK"
+    if {!$is_smp} {
+        # It's hard to get unmangled proc-a output on SMP
+        must "proc-a: reply from pid 7: OK"
+    }
+    # Kernel always hold console lock, so it's fine to match this after proc-a&b finishes
+    must "process 6 exited"
 }
 
 # Shell tests

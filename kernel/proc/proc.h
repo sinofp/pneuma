@@ -40,7 +40,7 @@ enum class prio_t : int_fast8_t {
 };
 
 struct process {
-    id_t pid = -1;      // Process ID
+    id_t pid = -1; // Process ID
     state_t state; // Process state
     prio_t prio;
     xlen_t *sp; // The stack pointer. We declare it as a pointer because it's being called pointer. Though it can also
@@ -66,7 +66,7 @@ extern process *idles[hart::MAX];    // per-hart idle; never enters the shared r
 
 inline process &current() { return *currents[hart::id()]; }
 
-process *create(span<const uint8_t>);
+process *create(span<const uint8_t>, bool = false);
 void chprio(process *, prio_t);
 void resume(process *);
 void ready(process *);
