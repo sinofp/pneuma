@@ -4,7 +4,7 @@
 
 namespace trap {
 void init();
-void kernel_entry();
+void enable_timer_intr(); // arm the one-shot timer + sstatus.SIE; call after proc::init
 
 struct [[gnu::packed]] frame {
     sxlen_t sepc;

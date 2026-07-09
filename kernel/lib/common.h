@@ -22,6 +22,7 @@ char *strcpy(char *, const char *); // TODO replace by strlcpy
 int strcmp(const char *, const char *);
 size_t strlen(const char *);
 void printf(const char *__restrict__, ...);
+void printf_unlocked(const char *__restrict__, ...);
 
 // Below functions are implemented in kernel using OpenSBI, and user using
 // syscall
@@ -58,9 +59,10 @@ namespace proc {
 extern void backtrace();
 }
 
-#define PANIC(fmt, ...)                                                       \
-    do {                                                                      \
-        printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-        proc::backtrace();                                                    \
-        sbi::shutdown();                                                      \
+// TODO move to debug.h?
+#define PANIC(fmt, ...)                                                                \
+    do {                                                                               \
+        printf_unlocked("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
+        proc::backtrace();                                                             \
+        sbi::shutdown();                                                               \
     } while (0)

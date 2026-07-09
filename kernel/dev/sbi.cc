@@ -17,6 +17,8 @@ enum class EID : xlen_t {
     DBCN = 0x4442434E,
     TIME = 0x54494D45,
     SRST = 0x53525354,
+    HSM = 0x48534D,
+    sPI = 0x735049, // sPI: s-mode IPI
 };
 
 // Many function arguments in SBI spec are defined as unsigned long.
@@ -82,5 +84,14 @@ void set_timer(uint64_t stime_value) {
 void shutdown() {
     sbi_call(0, 0, 0, 0, 0, 0, 0, EID::SRST);
 }
+
+// Hart start (FID #0) struct sbiret sbi_hart_start(unsigned long hartid, unsigned long start_addr, unsigned long
+// opaque)
+long hart_start(xlen_t hartid, xlen_t start_addr, xlen_t opaque) {
+    return sbi_call(hartid, start_addr, opaque, 0, 0, 0, 0, EID::HSM).error;
+}
+
+// Send IPI (FID #0) struct sbiret sbi_send_ipi(unsigned long hart_mask, unsigned long hart_mask_base)
+void send_ipi(xlen_t hart_mask, xlen_t hart_mask_base) { sbi_call(hart_mask, hart_mask_base, 0, 0, 0, 0, 0, EID::sPI); }
 
 } // namespace sbi

@@ -1,6 +1,7 @@
 #include "mem/mem.h"
 #include "dev/mmio.h"
 #include "fdt/fdt.h"
+#include "lib/lock.h"
 #include "lib/span.h"
 #include <virtio.h>
 
@@ -100,6 +101,7 @@ void init() {
 }
 
 paddr_t alloc_frame() {
+    lock::assert_bkl_held();
     if (!free_stack.capacity()) [[unlikely]]
         PANIC("alloc_frame called before mem::init");
 
@@ -109,6 +111,7 @@ paddr_t alloc_frame() {
 }
 
 void free_frame(paddr_t paddr) {
+    lock::assert_bkl_held();
     if (!is_aligned(paddr, PAGE_SIZE)) [[unlikely]]
         PANIC("unaligned paddr 0x%lx", paddr);
 

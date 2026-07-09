@@ -1,4 +1,6 @@
 #include "lib/common.h"
+#include "lib/lock.h"
+#include "trap/csr.h"
 
 void *memcpy(void *__restrict__ dst, const void *__restrict__ src, size_t n) {
     auto *d = static_cast<uint8_t *>(dst);
@@ -69,10 +71,8 @@ template <typename T> void print_dec(T value) {
 }
 } // namespace
 
-void printf(const char *__restrict__ format, ...) {
-    va_list vargs;
-    va_start(vargs, format);
-
+namespace {
+void vprintf(const char *__restrict__ format, va_list vargs) {
     while (*format) {
         if (*format == '%') {
             switch (*++format) { // Skip '%', read the next character
@@ -132,6 +132,25 @@ void printf(const char *__restrict__ format, ...) {
         ++format;
     }
 
-end:
+end:;
+}
+} // namespace
+
+// Locked
+void printf(const char *__restrict__ format, ...) {
+    csr::intr_guard ig;
+    lock::guard g{ lock::console };
+
+    va_list vargs;
+    va_start(vargs, format);
+    vprintf(format, vargs);
+    va_end(vargs);
+}
+
+// For PANIC and other malfunction paths
+void printf_unlocked(const char *__restrict__ format, ...) {
+    va_list vargs;
+    va_start(vargs, format);
+    vprintf(format, vargs);
     va_end(vargs);
 }

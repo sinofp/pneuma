@@ -1,6 +1,7 @@
 #include "trap/trap.h"
 #include "dev/sbi.h"
 #include "lib/debug.h"
+#include "lib/hart.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
 #include "trap/csr.h"
@@ -10,10 +11,12 @@
 namespace {
 constexpr uint64_t timer_interrupt_ms = 5;
 constexpr int64_t quantum = 1;
-int64_t preempt = quantum;
+int64_t preempts[hart::MAX]; // per-hart quantum countdown; zero-init preempts on the first tick
 } // namespace
 
 namespace trap {
+// User code is not compiled with -ffixed-x4, so we use template to save the hart id.
+template <size_t HARTID>
 [[using gnu: naked, aligned(4)]]
 void kernel_entry() {
     asm volatile(
@@ -26,20 +29,20 @@ void kernel_entry() {
         "csrr t0, sstatus\n"
         // Get SPP: Supervisor Previous Privilege
         "andi t0, t0, 1 << 8\n"
-        "bnez t0, __from_kernel\n"
+        "bnez t0, __from_kernel%=\n"
 
         // We must not trust the stack pointer at the time of exception.
         // Retrieve the kernel stack of the running process from sscratch.
         "csrrw sp, sscratch, sp\n"
         // sp now points to the kernel (not user) stack of the currently running process.
         // sscratch now holds the original value of sp (user stack) at the time of the exception
-        "j __save\n"
+        "j __save%=\n"
 
-        "__from_kernel:\n"
+        "__from_kernel%=:\n"
         "csrw sscratch, sp\n"
         // sscratch now holds the original value of sp (kernel stack) at the time of the exception
 
-        "__save:\n"
+        "__save%=:\n"
         "addi sp, sp, -%[size]\n"
         STORE " ra,  %[ra](sp)\n"
         STORE " gp,  %[gp](sp)\n"
@@ -85,7 +88,10 @@ void kernel_entry() {
         "csrr t1, sstatus\n"
         STORE " t1,  %[sstatus](sp)\n"
 
-        "__call_handle_trap:\n"
+        // The user tp is in the frame now; from here the kernel owns tp.
+        "li tp, %[hartid]\n"
+
+        "__call_handle_trap%=:\n"
         // Retrieve and save the sp at the time of exception.
         "csrr t2, sscratch\n"
         STORE " t2, %[sp](sp)\n"
@@ -111,7 +117,7 @@ void kernel_entry() {
 
         "call handle_trap\n"
 
-        "__restore:\n"
+        "__restore%=:\n"
         // Pop the prev fp and ra
         "addi sp, sp, %[xlen_size]+%[xlen_size]\n"
         LOAD " t0, %[sepc](sp)\n"
@@ -172,7 +178,8 @@ void kernel_entry() {
           [s5] "i"(offsetof(frame, s5)), [s6] "i"(offsetof(frame, s6)), [s7] "i"(offsetof(frame, s7)),
           [s8] "i"(offsetof(frame, s8)), [s9] "i"(offsetof(frame, s9)), [s10] "i"(offsetof(frame, s10)),
           [s11] "i"(offsetof(frame, s11)), [sp] "i"(offsetof(frame, sp)), [sepc] "i"(offsetof(frame, sepc)),
-          [sstatus] "i"(offsetof(frame, sstatus)), [xlen_size] "i"(static_cast<xlen_t>(sizeof(xlen_t))));
+          [sstatus] "i"(offsetof(frame, sstatus)), [xlen_size] "i"(static_cast<xlen_t>(sizeof(xlen_t))),
+          [hartid] "i"(HARTID));
 }
 } // namespace trap
 
@@ -195,12 +202,15 @@ void handle_syscall(trap::frame *f) {
             proc::sleep_ms(1);
         }
         break;
-    case SYS_EXIT:
-        printf("process %d exited\n", proc::current->pid);
-        proc::destroy(proc::current);
-        proc::current->state = proc::state_t::UNUSED;
-        proc::reschedule();
+    case SYS_EXIT: {
+        printf("process %d exited\n", proc::current().pid);
+        // Park as EXITED and wait until we change satp to recyle the PCB
+        csr::intr_guard ig;
+        lock::guard g{ lock::bkl };
+        proc::current().state = proc::state_t::EXITED;
+        proc::reschedule(g);
         PANIC("unreachable");
+    }
     case SYS_SLEEP:
         proc::sleep_ms(f->a0);
         break;
@@ -256,30 +266,30 @@ extern "C" void handle_trap(trap::frame *f) {
         break;
     case STimerIntr: {
         set_next_timer_interrupt();
-        // printf("Time: %ldms!\n", static_cast<long>(csr::time::read_ms()));
-        auto sleepq = proc::sleep_queue();
-        if (!sleepq.empty()) {
-            // printf("Adjusting sleeping delta list\n");
-            sleepq.first_key() -= timer_interrupt_ms;
-            if (sleepq.first_key() <= 0)
-                proc::wakeup();
-        }
-        if (--preempt <= 0 and !proc::ready_queue().empty()) {
-            // printf("Preempt scheduling\n");
-            preempt = quantum;
-            proc::reschedule();
-        }
+        bool preempt_due = --preempts[hart::id()] <= 0;
+        if (preempt_due)
+            preempts[hart::id()] = quantum;
+        proc::timer_tick(timer_interrupt_ms, preempt_due);
     } break;
+    case SSoftwareIntr: // IPI
+        csr::sip::clear_ssip();
+        proc::reschedule();
+        break;
     case SExternalIntr: {
         // External interrupt from PLIC. All virtio IRQs are owned by user-space drivers now:
         // mark pending, wake the owner if it's blocked, defer plic::complete to the owner's next wait call.
-        if (const auto irq = plic::claim(0)) {
+        lock::guard g{ lock::bkl }; // SIE already 0 in trap context
+        if (const auto irq = plic::claim()) {
             if (auto pid = driver::owner(irq); 0 <= pid) {
                 driver::mark_pending(irq);
-                driver::wake_if_waiting(&proc::procs[pid], irq);
+                // Switch to the (typically higher-priority) driver now instead of waiting for
+                // the next 5 ms preempt tick — only when we actually made it ready.
+                if (driver::wake_if_waiting(&proc::procs[pid], irq, g))
+                    proc::reschedule(g);
             } else {
-                printf("Unexpected IRQ: %d\n", irq);
-                plic::complete(0, irq);
+                printf_unlocked("Unexpected IRQ: %d\n", irq); // bkl held: printf's console lock nests fine, but
+                                                              // keep the rare error path lock-free
+                plic::complete(irq);
             }
         }
         break;
@@ -314,20 +324,32 @@ extern "C" void handle_trap(trap::frame *f) {
 
 namespace trap {
 
+constexpr void (*kernel_entries[])(){ kernel_entry<0>, kernel_entry<1>, kernel_entry<2>, kernel_entry<3>, kernel_entry<4> };
+static_assert(hart::MAX == sizeof(kernel_entries) / sizeof(kernel_entries[0]),
+              "one kernel_entry instantiation per hart");
+
 void init() {
     using namespace csr;
 
     // This is super important, without setting stvec, sret won't take us to sepc.
-    stvec{ kernel_entry, stvec::Mode::Direct }.write();
+    // Each hart gets its own instantiation so trap entry can re-materialise its hartid.
+    stvec{ kernel_entries[hart::id()], stvec::Mode::Direct }.write();
 
-    // Set next timer interrupt (mtimecmp) before enabling timer interrupt
+    // Initialize PLIC for external interrupts: this (boot) hart's S-mode context takes them
+    // all; OpenSBI's lottery may pick a hart != 0, so the context is computed, not assumed.
+    plic::init(hart::id());
+
+    // Enable supervisor software (IPI), timer, and external interrupt sources; delivery stays
+    // off until enable_timer_intr() sets sstatus.SIE, after the scheduler structures exist.
+    sie::read().set(sie_enc::SSIE).set(sie_enc::STIE).set(sie_enc::SEIE).write();
+}
+
+void enable_timer_intr() {
+    using namespace csr;
+
+    // Arm the one-shot timer before turning interrupt delivery on. Doing this before
+    // proc::init would let a tick preempt into scheduler structures that don't exist yet.
     set_next_timer_interrupt();
-
-    // Initialize PLIC for external interrupts
-    plic::init();
-
-    // Enable supervisor timer and external interrupts
-    sie::read().set(sie_enc::STIE).set(sie_enc::SEIE).write();
     sstatus::read().set(sstatus_enc::SIE).write();
 }
 

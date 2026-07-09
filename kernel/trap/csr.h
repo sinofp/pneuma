@@ -125,6 +125,14 @@ struct sie : reg<sie, sie_enc> {
     void write() const { asm volatile("csrw sie, %0" ::"r"(value)); }
 };
 
+namespace sip {
+// Ack an IPI: clear the supervisor software-interrupt pending bit.
+[[gnu::always_inline]]
+inline void clear_ssip() {
+    asm volatile("csrci sip, %0" ::"i"(static_cast<sxlen_t>(sie_enc::SSIE)));
+}
+} // namespace sip
+
 enum class sstatus_enc : sxlen_t {
     SIE = 1 << 1,  // Supervisor Interrupt Enable
     SPIE = 1 << 5, // Supervisor Previous Interrupt Enable
@@ -192,24 +200,25 @@ inline auto read() {
 }
 
 inline auto read_ms() { return read() / fdt::clk_freq_ms; }
-
 } // namespace time
 
 class intr_guard {
-    sstatus prev_sstatus;
+    sxlen_t prev_sie;
 
 public:
-    explicit intr_guard()
-        : prev_sstatus{ sstatus::read() } {
-        // Disable interrupts
-        // unset don't modify the sstatus.value, so we still save the previous value.
-        prev_sstatus.unset(sstatus_enc::SIE).write();
+    [[gnu::always_inline]]
+    inline explicit intr_guard() {
+        asm volatile("csrrci %0, sstatus, %1"
+                     : "=r"(prev_sie)
+                     : "i"(static_cast<sxlen_t>(sstatus_enc::SIE)));
+        prev_sie &= static_cast<sxlen_t>(sstatus_enc::SIE);
     }
 
-    ~intr_guard() {
+    [[gnu::always_inline]]
+    inline ~intr_guard() {
         // Restore, rather than enable interrupts
         // Only restoring ensuring us not turning interrupts on when it was originally off
-        prev_sstatus.write();
+        asm volatile("csrs sstatus, %0" ::"r"(prev_sie));
     }
 
     // Disable copy ctor to make sure we only manage interrupts in one instance

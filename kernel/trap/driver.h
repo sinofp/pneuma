@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lib/lock.h"
 #include "lib/types.h"
 #include "proc/proc.h"
 
@@ -10,9 +11,9 @@ constexpr size_t MAX_IRQ = 96; // QEMU virt uses irqs in the low 30s; ample head
 // Returns the pid that owns `irq`, or -1 if unowned. Used by trap dispatch.
 proc::id_t owner(uint32_t irq);
 
-// Trap-side helpers (called from SExternalIntr handler under SIE=0).
+// Trap-side helpers (called from the SExternalIntr handler, SIE=0, bkl held).
 void mark_pending(uint32_t irq); // sets pending flag for a claimed-but-undelivered IRQ
-void wake_if_waiting(proc::process *p, uint32_t irq);
+bool wake_if_waiting(proc::process *p, uint32_t irq, lock::guard &); // true iff we actually readied p
 
 // Syscall handlers. Return values are stuffed into trap::frame::a0 by the caller.
 xlen_t sys_fdt_virtio(vaddr_t user_buf, size_t max);

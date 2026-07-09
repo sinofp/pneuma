@@ -16,20 +16,20 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
 
       # Architecture configurations
-      # IMD: base integer + integer multiply/divide + double-float for DOOM
+      # IMAD: base integer + integer multiply/divide + double-float for DOOM and Atomic for SMP
       # zicsr: CSR instructions for kernel
       # zifencei: FENCE.I instruction for memory fences
       archConfigs = {
         riscv32 = {
           target = "riscv32-unknown-elf";
           elfFormat = "elf32-littleriscv";
-          march = "rv32imd_zicsr_zifencei";
+          march = "rv32imad_zicsr_zifencei";
           mabi = "ilp32d";
         };
         riscv64 = {
           target = "riscv64-unknown-elf";
           elfFormat = "elf64-littleriscv";
-          march = "rv64imd_zicsr_zifencei";
+          march = "rv64imad_zicsr_zifencei";
           mabi = "lp64d";
         };
       };
@@ -260,8 +260,9 @@
               common = "-g3 -Wall -Wextra ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie}";
             in
             {
-              # Kernel C++ flags
-              kernel = "-std=c++2c ${common} -fno-exceptions -I kernel -isystem ${driverDir}";
+              # Kernel C++ flags. -ffixed-x4 keeps the compiler off tp, which holds the hartid
+              # kernel-wide (user code may still clobber it; trap entry re-derives it).
+              kernel = "-std=c++2c ${common} -fno-exceptions -ffixed-x4 -I kernel -isystem ${driverDir}";
               # User C++ flags
               cxx = "-std=c++2c ${common} -fno-exceptions -nostdlibinc -isystem ${includeDir} -isystem ${driverDir}";
               # User C flags
