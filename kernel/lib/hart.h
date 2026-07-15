@@ -11,6 +11,8 @@ constexpr size_t MAX = 5;
 // The hart that won OpenSBI's boot lottery: ticks the sleep queue and owns the PLIC S-context.
 extern size_t primary;
 
+extern bool startable[MAX];
+
 [[gnu::always_inline]]
 inline size_t id() {
     xlen_t v;

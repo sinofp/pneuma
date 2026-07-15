@@ -5,7 +5,7 @@
 set -u
 
 local -a bases=(rv32 rv64 "rv64 --uboot")
-local -a configs
+local -a configs=(vf2)
 local base gpu smp
 for base in $bases; {
     for gpu in "" "--gpu"; {

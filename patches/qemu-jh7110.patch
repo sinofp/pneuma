@@ -1,0 +1,463 @@
+diff --git a/hw/riscv/Kconfig b/hw/riscv/Kconfig
+index fc9c35bd98..c0a57faf53 100644
+--- a/hw/riscv/Kconfig
++++ b/hw/riscv/Kconfig
+@@ -9,6 +9,15 @@ config IBEX
+ 
+ # RISC-V machines in alphabetical order
+ 
++config JH7110
++    bool
++    default y
++    depends on RISCV64
++    select DEVICE_TREE
++    select RISCV_ACLINT
++    select SIFIVE_PLIC
++    select SERIAL_MM
++
+ config MICROCHIP_PFSOC
+     bool
+     default y
+diff --git a/hw/riscv/jh7110.c b/hw/riscv/jh7110.c
+new file mode 100644
+index 0000000000..f6448b32e5
+--- /dev/null
++++ b/hw/riscv/jh7110.c
+@@ -0,0 +1,378 @@
++/*
++ * StarFive JH7110 SoC machine (VisionFive 2 Lite twin)
++ *
++ * A QEMU model of the JH7110 sufficient to bring up an S-mode kernel:
++ * OpenSBI (fw_dynamic, generic FDT-driven platform) hands off to the kernel
++ * at DRAM 0x40200000. Templated off hw/riscv/spike.c (boot/FDT flow) and
++ * hw/riscv/virt.c (PLIC, serial_mm, virtio-mmio). Topology:
++ *   - hart 0: MMU-less rv64imac S7 monitor (sifive-e51, cpu@0 status=disabled)
++ *   - harts 1..N: rv64 U74 application cores (sifive-u54, Sv39)
++ *   The E51's missing S-extension makes the PLIC config "M,MS,MS,MS,MS", so
++ *   S-context(hart h) = 2h (not virt's 2h+1); interrupts-extended is emitted
++ *   M-before-S to match, and CLINT gives every hart M-soft/M-timer.
++ *   - CLINT @ 4 MHz timebase, SiFive PLIC (0x88 sources), one 16550 UART
++ *   - virtio-mmio x8 @ 0x1a000000, IRQs 120..127 (a hole unused on real
++ *     silicon) substitute for the board's DW-MMC storage so the existing
++ *     virtio-blk driver keeps the fs/blk stack alive.
++ *
++ * TODO(vf2): the real board's UART is a dw-apb-uart (reg-shift=2); this uses a
++ * stock ns16550a (reg-shift 0), which works because OpenSBI drives the console
++ * and the FDT/device agree. A native UART driver would need the real geometry.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/units.h"
++#include "qemu/error-report.h"
++#include "qapi/error.h"
++#include "hw/boards.h"
++#include "hw/sysbus.h"
++#include "hw/char/serial-mm.h"
++#include "hw/intc/riscv_aclint.h"
++#include "hw/intc/sifive_plic.h"
++#include "target/riscv/cpu.h"
++#include "hw/riscv/riscv_hart.h"
++#include "hw/riscv/boot.h"
++#include "hw/riscv/jh7110.h"
++#include "chardev/char.h"
++#include "system/device_tree.h"
++#include "system/system.h"
++
++/* JH7110: 4 MHz timebase (cpus/timebase-frequency = 0x003D0900). */
++#define JH7110_TIMEBASE_FREQ 4000000
++
++#define JH7110_PLIC_NUM_SOURCES 0x89
++#define JH7110_PLIC_NUM_PRIO_BITS 3
++#define JH7110_PLIC_PRIORITY_BASE 0x00
++#define JH7110_PLIC_PENDING_BASE 0x1000
++#define JH7110_PLIC_ENABLE_BASE 0x2000
++#define JH7110_PLIC_ENABLE_STRIDE 0x80
++#define JH7110_PLIC_CONTEXT_BASE 0x200000
++#define JH7110_PLIC_CONTEXT_STRIDE 0x1000
++
++/* IRQ 32 on the real JH7110 dw-apb-uart; stock ns16550a here. */
++#define JH7110_UART0_IRQ 32
++#define JH7110_VIRTIO_IRQ 120
++#define JH7110_VIRTIO_COUNT 8
++
++static const MemMapEntry jh7110_memmap[] = {
++    [JH7110_MROM]   = {     0x1000,    0xf000 },
++    [JH7110_CLINT]  = {  0x2000000,   0x10000 },
++    [JH7110_PLIC]   = {  0xc000000, 0x4000000 },
++    [JH7110_UART0]  = { 0x10000000,     0x100 },
++    [JH7110_VIRTIO] = { 0x1a000000,    0x1000 },
++    [JH7110_DRAM]   = { 0x40000000,       0x0 },
++};
++
++static void jh7110_create_fdt(JH7110State *s, const MemMapEntry *memmap)
++{
++    MachineState *ms = MACHINE(s);
++    int num_harts = ms->smp.cpus;
++    void *fdt;
++    int fdt_size;
++    uint32_t *clint_cells, *plic_cells;
++    uint32_t plic_phandle, phandle = 1;
++    char *node_name;
++    int cpu;
++    static const char * const clint_compat[2] = {
++        "sifive,clint0", "riscv,clint0"
++    };
++    static const char * const plic_compat[2] = {
++        "sifive,plic-1.0.0", "riscv,plic0"
++    };
++
++    fdt = ms->fdt = create_device_tree(&fdt_size);
++    if (!fdt) {
++        error_report("create_device_tree() failed");
++        exit(1);
++    }
++
++    qemu_fdt_setprop_string(fdt, "/", "model", "starfive,jh7110-qemu");
++    qemu_fdt_setprop_string(fdt, "/", "compatible", "starfive,jh7110");
++    qemu_fdt_setprop_cell(fdt, "/", "#size-cells", 0x2);
++    qemu_fdt_setprop_cell(fdt, "/", "#address-cells", 0x2);
++
++    qemu_fdt_add_subnode(fdt, "/soc");
++    qemu_fdt_setprop(fdt, "/soc", "ranges", NULL, 0);
++    qemu_fdt_setprop_string(fdt, "/soc", "compatible", "simple-bus");
++    qemu_fdt_setprop_cell(fdt, "/soc", "#size-cells", 0x2);
++    qemu_fdt_setprop_cell(fdt, "/soc", "#address-cells", 0x2);
++
++    qemu_fdt_add_subnode(fdt, "/cpus");
++    qemu_fdt_setprop_cell(fdt, "/cpus", "timebase-frequency",
++                          JH7110_TIMEBASE_FREQ);
++    qemu_fdt_setprop_cell(fdt, "/cpus", "#size-cells", 0x0);
++    qemu_fdt_setprop_cell(fdt, "/cpus", "#address-cells", 0x1);
++
++    /*
++     * clint/plic interrupt maps: one (phandle, cause) pair per context, in
++     * ascending hart order to match sifive_plic's context numbering.
++     *
++     * hart 0 is the MMU-less S7 monitor: M-mode only, so it contributes an
++     * M context but NO S context. Every U74 (hart >= 1) contributes M then S.
++     * That yields PLIC contexts [h0 M][h1 M][h1 S][h2 M][h2 S]... so
++     * S-ctx(h) = 2h (not virt's 2h+1). CLINT keeps M-soft/M-timer for all.
++     *
++     * plic_cells is therefore variable length: 1 context for hart 0, 2 for
++     * each of the remaining harts.
++     */
++    clint_cells = g_new0(uint32_t, num_harts * 4);
++    plic_cells = g_new0(uint32_t, 2 + (num_harts - 1) * 4);
++
++    for (cpu = num_harts - 1; cpu >= 0; cpu--) {
++        uint32_t intc_phandle = phandle++;
++        bool is_s7 = !cpu;
++
++        node_name = g_strdup_printf("/cpus/cpu@%d", cpu);
++        qemu_fdt_add_subnode(fdt, node_name);
++        if (is_s7) {
++            /* S7: no MMU, parked by firmware -> status="disabled". */
++            riscv_isa_write_fdt(&s->s_cpus.harts[0], fdt, node_name);
++            qemu_fdt_setprop_string(fdt, node_name, "status", "disabled");
++        } else {
++            qemu_fdt_setprop_string(fdt, node_name, "mmu-type", "riscv,sv39");
++            riscv_isa_write_fdt(&s->u_cpus.harts[cpu - 1], fdt, node_name);
++            qemu_fdt_setprop_string(fdt, node_name, "status", "okay");
++        }
++        qemu_fdt_setprop_string(fdt, node_name, "compatible", "riscv");
++        qemu_fdt_setprop_cell(fdt, node_name, "reg", cpu);
++        qemu_fdt_setprop_string(fdt, node_name, "device_type", "cpu");
++        g_free(node_name);
++
++        node_name = g_strdup_printf("/cpus/cpu@%d/interrupt-controller", cpu);
++        qemu_fdt_add_subnode(fdt, node_name);
++        qemu_fdt_setprop_cell(fdt, node_name, "#interrupt-cells", 1);
++        qemu_fdt_setprop(fdt, node_name, "interrupt-controller", NULL, 0);
++        qemu_fdt_setprop_string(fdt, node_name, "compatible", "riscv,cpu-intc");
++        qemu_fdt_setprop_cell(fdt, node_name, "phandle", intc_phandle);
++        g_free(node_name);
++
++        clint_cells[cpu * 4 + 0] = cpu_to_be32(intc_phandle);
++        clint_cells[cpu * 4 + 1] = cpu_to_be32(IRQ_M_SOFT);
++        clint_cells[cpu * 4 + 2] = cpu_to_be32(intc_phandle);
++        clint_cells[cpu * 4 + 3] = cpu_to_be32(IRQ_M_TIMER);
++
++        if (is_s7) {
++            /* hart 0: M-external context only. */
++            plic_cells[0] = cpu_to_be32(intc_phandle);
++            plic_cells[1] = cpu_to_be32(IRQ_M_EXT);
++        } else {
++            /* hart c: M then S, after hart 0's single M entry. */
++            int off = 2 + (cpu - 1) * 4;
++            plic_cells[off + 0] = cpu_to_be32(intc_phandle);
++            plic_cells[off + 1] = cpu_to_be32(IRQ_M_EXT);
++            plic_cells[off + 2] = cpu_to_be32(intc_phandle);
++            plic_cells[off + 3] = cpu_to_be32(IRQ_S_EXT);
++        }
++    }
++
++    node_name = g_strdup_printf("/memory@%lx", (long)memmap[JH7110_DRAM].base);
++    qemu_fdt_add_subnode(fdt, node_name);
++    qemu_fdt_setprop_cells(fdt, node_name, "reg",
++                           memmap[JH7110_DRAM].base >> 32,
++                           memmap[JH7110_DRAM].base,
++                           ms->ram_size >> 32, ms->ram_size);
++    qemu_fdt_setprop_string(fdt, node_name, "device_type", "memory");
++    g_free(node_name);
++
++    node_name = g_strdup_printf("/soc/clint@%lx",
++                               (long)memmap[JH7110_CLINT].base);
++    qemu_fdt_add_subnode(fdt, node_name);
++    qemu_fdt_setprop_string_array(fdt, node_name, "compatible",
++                                  (char **)&clint_compat,
++                                  ARRAY_SIZE(clint_compat));
++    qemu_fdt_setprop_cells(fdt, node_name, "reg",
++                           0x0, memmap[JH7110_CLINT].base,
++                           0x0, memmap[JH7110_CLINT].size);
++    qemu_fdt_setprop(fdt, node_name, "interrupts-extended",
++                     clint_cells, num_harts * sizeof(uint32_t) * 4);
++    g_free(node_name);
++
++    plic_phandle = phandle++;
++    node_name = g_strdup_printf("/soc/plic@%lx",
++                               (long)memmap[JH7110_PLIC].base);
++    qemu_fdt_add_subnode(fdt, node_name);
++    qemu_fdt_setprop_cell(fdt, node_name, "#address-cells", 0x0);
++    qemu_fdt_setprop_cell(fdt, node_name, "#interrupt-cells", 0x1);
++    qemu_fdt_setprop_string_array(fdt, node_name, "compatible",
++                                  (char **)&plic_compat,
++                                  ARRAY_SIZE(plic_compat));
++    qemu_fdt_setprop(fdt, node_name, "interrupt-controller", NULL, 0);
++    qemu_fdt_setprop(fdt, node_name, "interrupts-extended",
++                     plic_cells, (2 + (num_harts - 1) * 4) * sizeof(uint32_t));
++    qemu_fdt_setprop_cells(fdt, node_name, "reg",
++                           0x0, memmap[JH7110_PLIC].base,
++                           0x0, memmap[JH7110_PLIC].size);
++    qemu_fdt_setprop_cell(fdt, node_name, "riscv,ndev",
++                          JH7110_PLIC_NUM_SOURCES - 1);
++    qemu_fdt_setprop_cell(fdt, node_name, "phandle", plic_phandle);
++    g_free(node_name);
++
++    g_free(clint_cells);
++    g_free(plic_cells);
++
++    node_name = g_strdup_printf("/soc/serial@%lx",
++                               (long)memmap[JH7110_UART0].base);
++    qemu_fdt_add_subnode(fdt, node_name);
++    qemu_fdt_setprop_string(fdt, node_name, "compatible", "ns16550a");
++    qemu_fdt_setprop_cells(fdt, node_name, "reg",
++                           0x0, memmap[JH7110_UART0].base,
++                           0x0, memmap[JH7110_UART0].size);
++    qemu_fdt_setprop_cell(fdt, node_name, "clock-frequency", 3686400);
++    qemu_fdt_setprop_cell(fdt, node_name, "interrupt-parent", plic_phandle);
++    qemu_fdt_setprop_cell(fdt, node_name, "interrupts", JH7110_UART0_IRQ);
++
++    qemu_fdt_add_subnode(fdt, "/chosen");
++    qemu_fdt_setprop_string(fdt, "/chosen", "stdout-path", node_name);
++    g_free(node_name);
++
++    hwaddr virtio_base = memmap[JH7110_VIRTIO].base;
++
++    for (int i = 0; i < JH7110_VIRTIO_COUNT; ++i) {
++        g_autofree char *name = NULL;
++        uint64_t size = memmap[JH7110_VIRTIO].size;
++        hwaddr addr = virtio_base + i * size;
++
++        name = g_strdup_printf("/soc/virtio_mmio@%"HWADDR_PRIx, addr);
++
++        qemu_fdt_add_subnode(fdt, name);
++        qemu_fdt_setprop_string(fdt, name, "compatible", "virtio,mmio");
++        qemu_fdt_setprop_sized_cells(fdt, name, "reg", 2, addr, 2, size);
++        qemu_fdt_setprop_cell(fdt, name, "interrupt-parent",
++            plic_phandle);
++        qemu_fdt_setprop_cell(fdt, name, "interrupts",
++                                  JH7110_VIRTIO_IRQ + i);
++    }
++}
++
++static void jh7110_machine_init(MachineState *machine)
++{
++    const MemMapEntry *memmap = jh7110_memmap;
++    JH7110State *s = JH7110_MACHINE(machine);
++    MemoryRegion *system_memory = get_system_memory();
++    MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
++    int num_harts = machine->smp.cpus;
++    target_ulong firmware_end_addr;
++    hwaddr firmware_load_addr = memmap[JH7110_DRAM].base;
++    uint64_t fdt_load_addr, kernel_entry = 0;
++    RISCVBootInfo boot_info;
++
++    /* hart 0 — S7 management core, rv64imac (no S, no MMU); E51 is closest */
++    object_initialize_child(OBJECT(machine), "s-cpus", &s->s_cpus,
++                            TYPE_RISCV_HART_ARRAY);
++    object_property_set_str(OBJECT(&s->s_cpus), "cpu-type",
++                            TYPE_RISCV_CPU_SIFIVE_E51, &error_abort);
++    object_property_set_int(OBJECT(&s->s_cpus), "hartid-base", 0, &error_abort);
++    object_property_set_int(OBJECT(&s->s_cpus), "num-harts", 1, &error_abort);
++    sysbus_realize(SYS_BUS_DEVICE(&s->s_cpus), &error_fatal);
++
++    /* harts 1..N — U74 application cores, Sv39 */
++    object_initialize_child(OBJECT(machine), "u-cpus", &s->u_cpus,
++                            TYPE_RISCV_HART_ARRAY);
++    object_property_set_str(OBJECT(&s->u_cpus), "cpu-type",
++                            machine->cpu_type, &error_abort);
++    object_property_set_int(OBJECT(&s->u_cpus), "hartid-base", 1, &error_abort);
++    object_property_set_int(OBJECT(&s->u_cpus), "num-harts",
++                            num_harts - 1, &error_abort);
++    sysbus_realize(SYS_BUS_DEVICE(&s->u_cpus), &error_fatal);
++
++    /*
++     * CLINT: SWI + MTIMER at the 4 MHz JH7110 timebase.
++     * provide_rdtime=false, as on real silicon: the U74 has no time CSR.
++     * rdtime traps and OpenSBI emulates it from the memory-mapped mtime
++     * (U74-MC Core Complex Manual, Table 86).
++     */
++    riscv_aclint_swi_create(memmap[JH7110_CLINT].base, 0, num_harts, false);
++    riscv_aclint_mtimer_create(
++        memmap[JH7110_CLINT].base + RISCV_ACLINT_SWI_SIZE,
++        RISCV_ACLINT_DEFAULT_MTIMER_SIZE, 0, num_harts,
++        RISCV_ACLINT_DEFAULT_MTIMECMP, RISCV_ACLINT_DEFAULT_MTIME,
++        JH7110_TIMEBASE_FREQ, false);
++
++    /*
++     * PLIC. riscv_plic_hart_config_string() reads each hart's ISA: the S7
++     * (hart 0, no RVS) becomes "M", the U74s "MS", giving "M,MS,MS,MS,MS"
++     * and S-ctx(h) = 2h -- matching the interrupts-extended emitted above.
++     */
++    g_autofree char *plic_config = riscv_plic_hart_config_string(num_harts);
++    s->plic = sifive_plic_create(
++        memmap[JH7110_PLIC].base, plic_config, num_harts, 0,
++        JH7110_PLIC_NUM_SOURCES,
++        (1U << JH7110_PLIC_NUM_PRIO_BITS) - 1,
++        JH7110_PLIC_PRIORITY_BASE, JH7110_PLIC_PENDING_BASE,
++        JH7110_PLIC_ENABLE_BASE, JH7110_PLIC_ENABLE_STRIDE,
++        JH7110_PLIC_CONTEXT_BASE, JH7110_PLIC_CONTEXT_STRIDE,
++        memmap[JH7110_PLIC].size);
++
++    serial_mm_init(system_memory, memmap[JH7110_UART0].base, 0,
++                   qdev_get_gpio_in(s->plic, JH7110_UART0_IRQ), 399193,
++                   serial_hd(0), DEVICE_LITTLE_ENDIAN);
++
++    /* DRAM + boot ROM. */
++    memory_region_add_subregion(system_memory, memmap[JH7110_DRAM].base,
++                                machine->ram);
++    memory_region_init_rom(mask_rom, NULL, "riscv.jh7110.mrom",
++                           memmap[JH7110_MROM].size, &error_fatal);
++    memory_region_add_subregion(system_memory, memmap[JH7110_MROM].base,
++                                mask_rom);
++
++    /* VirtIO MMIO devices */
++    for (int i = 0; i < JH7110_VIRTIO_COUNT; ++i) {
++        sysbus_create_simple("virtio-mmio",
++            memmap[JH7110_VIRTIO].base + i * memmap[JH7110_VIRTIO].size,
++            qdev_get_gpio_in(s->plic, JH7110_VIRTIO_IRQ + i));
++    }
++
++    /* OpenSBI (fw_dynamic works — generic platform is FDT-driven). */
++    firmware_end_addr = riscv_find_and_load_firmware(
++        machine, riscv_default_firmware_name(&s->u_cpus),
++        &firmware_load_addr, NULL);
++
++    jh7110_create_fdt(s, memmap);
++
++    riscv_boot_info_init(&boot_info, &s->u_cpus);
++    if (machine->kernel_filename) {
++        target_ulong kernel_start_addr =
++            riscv_calc_kernel_start_addr(&boot_info, firmware_end_addr);
++        riscv_load_kernel(machine, &boot_info, kernel_start_addr, true, NULL);
++        kernel_entry = boot_info.image_low_addr;
++    }
++
++    fdt_load_addr = riscv_compute_fdt_addr(memmap[JH7110_DRAM].base,
++                                           memmap[JH7110_DRAM].size,
++                                           machine, &boot_info);
++    riscv_load_fdt(fdt_load_addr, machine->fdt);
++
++    riscv_setup_rom_reset_vec(machine, &s->u_cpus, firmware_load_addr,
++                              memmap[JH7110_MROM].base,
++                              memmap[JH7110_MROM].size, kernel_entry,
++                              fdt_load_addr);
++}
++
++static void jh7110_machine_class_init(ObjectClass *oc, const void *data)
++{
++    MachineClass *mc = MACHINE_CLASS(oc);
++
++    mc->desc = "StarFive JH7110";
++    mc->init = jh7110_machine_init;
++    mc->default_cpus = mc->max_cpus = JH7110_CPUS_MAX;
++    mc->min_cpus = 2;
++    mc->default_cpu_type = TYPE_RISCV_CPU_SIFIVE_U54;
++    mc->default_ram_id = "riscv.jh7110.ram";
++    mc->default_ram_size = 1 * GiB;
++}
++
++static const TypeInfo jh7110_machine_typeinfo = {
++    .name          = TYPE_JH7110_MACHINE,
++    .parent        = TYPE_MACHINE,
++    .class_init    = jh7110_machine_class_init,
++    .instance_size = sizeof(JH7110State),
++};
++
++static void jh7110_machine_register_types(void)
++{
++    type_register_static(&jh7110_machine_typeinfo);
++}
++
++type_init(jh7110_machine_register_types)
+diff --git a/hw/riscv/meson.build b/hw/riscv/meson.build
+index 2a8d5b136c..90f2b08ec0 100644
+--- a/hw/riscv/meson.build
++++ b/hw/riscv/meson.build
+@@ -7,6 +7,7 @@ riscv_ss.add(when: 'CONFIG_RISCV_VIRT', if_true: files('virt.c'))
+ riscv_ss.add(when: 'CONFIG_SHAKTI_C', if_true: files('shakti_c.c'))
+ riscv_ss.add(when: 'CONFIG_SIFIVE_E', if_true: files('sifive_e.c'))
+ riscv_ss.add(when: 'CONFIG_SIFIVE_U', if_true: files('sifive_u.c'))
++riscv_ss.add(when: 'CONFIG_JH7110', if_true: files('jh7110.c'))
+ riscv_ss.add(when: 'CONFIG_SPIKE', if_true: files('spike.c'))
+ riscv_ss.add(when: 'CONFIG_MICROCHIP_PFSOC', if_true: files('microchip_pfsoc.c'))
+ riscv_ss.add(when: 'CONFIG_ACPI', if_true: files('virt-acpi-build.c'))
+diff --git a/include/hw/riscv/jh7110.h b/include/hw/riscv/jh7110.h
+new file mode 100644
+index 0000000000..dba7b648c2
+--- /dev/null
++++ b/include/hw/riscv/jh7110.h
+@@ -0,0 +1,41 @@
++/*
++ * StarFive JH7110 SoC machine interface (VisionFive 2 Lite twin)
++ *
++ * See hw/riscv/jh7110.c for the machine model.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#ifndef HW_RISCV_JH7110_H
++#define HW_RISCV_JH7110_H
++
++#include "hw/boards.h"
++#include "hw/riscv/riscv_hart.h"
++#include "hw/sysbus.h"
++
++#define JH7110_CPUS_MAX 5
++
++#define TYPE_JH7110_MACHINE MACHINE_TYPE_NAME("jh7110")
++typedef struct JH7110State JH7110State;
++DECLARE_INSTANCE_CHECKER(JH7110State, JH7110_MACHINE, TYPE_JH7110_MACHINE)
++
++struct JH7110State {
++    /*< private >*/
++    MachineState parent;
++
++    /*< public >*/
++    RISCVHartArrayState s_cpus;
++    RISCVHartArrayState u_cpus;
++    DeviceState *plic;
++};
++
++enum {
++    JH7110_MROM,
++    JH7110_CLINT,
++    JH7110_PLIC,
++    JH7110_UART0,
++    JH7110_VIRTIO,
++    JH7110_DRAM,
++};
++
++#endif

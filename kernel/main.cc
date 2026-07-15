@@ -10,11 +10,24 @@
 // forward declaration for sbi::hart_start.
 extern "C" void boot(xlen_t, const fdt::header *);
 
-namespace {
-
+// Cold-boot-once flag, serving two phases of the same "first hart" fact:
+//   - relocate_self (pre-GOT) reads it via `lla` to apply relocations exactly once;
+//   - kernel_main (post-GOT) reads it normally to route secondaries.
 volatile int is_cold_boot = 1;
 
+namespace {
+
 int smp_ready = 0;
+
+// static-PIE self-relocation metadata (see kernel.ld).
+// The flake's pieGuard asserts every entry is R_RISCV_RELATIVE, so the loop applies them without checking r_info.
+struct Elf64_Rela {
+    uint64_t r_offset; // Elf64_Addr
+    uint64_t r_info;   // Elf64_Xword: symbol<<32 | type
+    int64_t r_addend;  // Elf64_Sxword: signed per the gABI
+};
+
+constexpr uint64_t LINK_BASE = 0x80200000; // must match kernel.ld __link_base
 
 [[noreturn]]
 void kernel_secondary_main() {
@@ -33,6 +46,9 @@ void kernel_secondary_main() {
 extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     if (!is_cold_boot)
         kernel_secondary_main();
+    // relocate_self reads this flag pre-GOT to gate the one-time relocation, so it
+    // must stay set until here and be cleared before any hart_start below launches a
+    // secondary -- otherwise a secondary would re-run the loop and double-apply the bias.
     is_cold_boot = 0;
 
     memset(__bss, 0, __bss_end - __bss);
@@ -115,7 +131,11 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     for (size_t h = 0; h < hart::MAX; h++) {
         if (hart::id() == h)
             continue;
-        if (auto err = sbi::hart_start(h, reinterpret_cast<xlen_t>(&boot), reinterpret_cast<xlen_t>(fdt_ptr)); 0 != err)
+        if (!hart::startable[h])
+            printf("hart %d not startable because lack of MMU or has been disabled in device tree\n",
+                   static_cast<int>(h));
+        else if (auto err = sbi::hart_start(h, reinterpret_cast<xlen_t>(&boot), reinterpret_cast<xlen_t>(fdt_ptr));
+                 0 != err)
             printf("hart %d not started (SBI error %ld)\n", static_cast<int>(h), err);
     }
     __atomic_store_n(&smp_ready, 1, __ATOMIC_RELEASE);
@@ -135,6 +155,28 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     proc::reschedule();
 
     proc::idle_loop();
+}
+
+extern "C" [[gnu::used, noreturn]]
+void relocate_self(xlen_t hartid, const fdt::header *fdt) {
+    if constexpr (64 == __riscv_xlen) {
+        uintptr_t self, rela_start, rela_end, flag;
+        asm volatile("lla %0, is_cold_boot"
+                     : "=r"(flag));
+        if (*reinterpret_cast<volatile int *>(flag)) { // cold hart only
+            asm volatile("lla %0, __kernel_base"
+                         : "=r"(self));
+            const intptr_t delta = self - LINK_BASE; // load bias
+            asm volatile("lla %0, __rela_start"
+                         : "=r"(rela_start));
+            asm volatile("lla %0, __rela_end"
+                         : "=r"(rela_end));
+            for (auto *r = reinterpret_cast<const Elf64_Rela *>(rela_start);
+                 r < reinterpret_cast<const Elf64_Rela *>(rela_end); ++r)
+                *reinterpret_cast<uint64_t *>(r->r_offset + delta) = r->r_addend + delta;
+        }
+    }
+    kernel_main(hartid, fdt);
 }
 
 [[using gnu: section(".text.boot"), naked]]
@@ -163,9 +205,11 @@ void boot([[maybe_unused]] xlen_t hartid, [[maybe_unused]] const fdt::header *fd
         "mv tp, a0\n" // Save the hart id as the first thing!
         "li s0, 0\n"  // RISC-V Calling Convention: The end of the frame record chain is indicated by a NULL pointer
                       // appearing as the next link in the chain
-        "la sp, __stack_top\n" // Load stack top address
-        "slli t0, a0, 17\n"    // hartid * 128 KiB: each hart gets its own boot-stack slot
+        // lla (PC-relative), not la (GOT-relative): the GOT is not yet relocated here.
+        "lla sp, __stack_top\n" // Load stack top address
+        "slli t0, a0, 17\n"     // hartid * 128 KiB: each hart gets its own boot-stack slot
         "sub sp, sp, t0\n"
-        "j kernel_main\n" // Jump to the kernel main function
-    );
+        // a0=hartid, a1=fdt flow in as relocate_self's params.
+        // It applies the static-PIE R_RISCV_RELATIVE fixups (rv64; no-op on rv32) then tail-calls kernel_main.
+        "j relocate_self\n");
 }

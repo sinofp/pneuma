@@ -11,7 +11,21 @@ proc must {pattern} {
 }
 
 set has_gpu [expr {"--gpu" in $argv}]
-set is_smp [expr {"--smp" in $argv}]
+set is_vf2 [expr {"vf2" in $argv}]
+
+# Mirror ./run's -smp default: 1 for virt, 5 for the jh7110 (fixed 1×S7 + 4×U74).
+set smp 1
+set smp_idx [lsearch -exact $argv "--smp"]
+if {$smp_idx >= 0} {
+    set smp [lindex $argv [expr {$smp_idx + 1}]]
+} elseif {$is_vf2} {
+    set smp 5
+}
+set is_smp [expr {$smp > 1}]
+
+# Secondaries = all harts minus the boot-lottery winner; on the jh7110 hart 0
+# (the MMU-less S7) is reported not-startable and never comes up.
+set ups [expr {$smp - 1 - $is_vf2}]
 
 spawn ./run {*}$argv
 
@@ -25,9 +39,12 @@ if {$has_gpu} {
 }
 
 if {$is_smp} {
-    # --smp 5: boot lottery picks one primary (random id); the other 4 harts
+    if {$is_vf2} {
+        must "hart 0 not startable because lack of MMU or has been disabled in device tree"
+    }
+    # Boot lottery picks one primary (random id); the remaining startable harts
     # come up as secondaries. Count them id-agnostically.
-    for {set i 0} {$i < 4} {incr i} {
+    for {set i 0} {$i < $ups} {incr i} {
         expect {
             -re {hart [0-9]+ up} {}
             timeout { puts "\nsmoke: TIMEOUT waiting for secondary harts"; exit 1 }

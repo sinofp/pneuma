@@ -1,8 +1,11 @@
 #include "fdt/fdt.h"
 #include "lib/common.h"
+#include "lib/hart.h"
 #include "lib/span.h"
 #include "lib/symbols.h"
 #include "trap/plic.h"
+
+using fdt::uninitialised;
 
 namespace {
 
@@ -31,16 +34,22 @@ template <> struct be<uint64_t> {
 
 inline uint32_t align4(uint32_t v) { return (v + 3u) & ~3u; }
 
-struct cell_view {
+class cell_view {
     span<const be<uint32_t>> cells;
     size_t idx = 0;
+
+public:
+    constexpr cell_view()
+        : cells(nullptr, 0) {}
 
     explicit constexpr cell_view(span<const be<uint32_t>> view)
         : cells(view) {}
 
+    bool empty() const { return idx == cells.size(); }
+
     uint32_t take_u32() {
-        if (idx >= cells.size())
-            return 0;
+        if (empty())
+            return uninitialised;
         uint32_t v = cells.data()[idx];
         ++idx;
         return v;
@@ -66,7 +75,7 @@ bool startswith(const char *string, const char *value) {
     return true;
 }
 
-bool compat_has(const char *data, uint32_t len, const char *target) {
+bool string_prop_has(const char *data, uint32_t len, const char *target) {
     // "compatible" is a list of NUL-terminated strings packed back-to-back.
     uint32_t i = 0;
     while (i < len) {
@@ -90,19 +99,23 @@ struct node_ctx {
     bool is_memory;
     bool is_rsvd_memory;
     bool is_cpus;
+    bool is_cpu;
+    bool is_interrupt_controller;
     bool is_virtio;
     bool is_plic;
-    uint64_t reg_addr;
-    uint64_t reg_size;
-    uint32_t irq;
-    bool reg_set;
-    bool irq_set;
+    uint64_t reg_addr = uninitialised;
+    uint64_t reg_size = uninitialised;
+    uint32_t irq = uninitialised; // TODO move out?
+    cell_view irq_ext;
+    bool reg_set; // TODO remove?
+    bool irq_set; // matches interrupts or interrupts-extended (only for PLIC) TODO remove?
+    uint32_t phandle = uninitialised;
+    bool has_mmu = false;
+    bool status_ok = true; // absent is okay
 };
 
 constexpr size_t max_depth = 16;
 } // namespace
-
-using fdt::uninitialised;
 
 namespace fdt {
 virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
@@ -112,6 +125,8 @@ size_t virtio_device_count = 0;
 namespace plic {
 paddr_t start_addr = uninitialised; // 0x0c000000;
 paddr_t end_addr = uninitialised;   // 0x00600000;
+uint32_t irq_ext[irq_ext_n];
+uint32_t hart_to_phandle[hart::MAX];
 } // namespace plic
 
 paddr_t free_ram_end;
@@ -137,6 +152,9 @@ struct header {
 };
 
 void init(const header *fdt_ptr) {
+    for (auto i = 0uz; i < hart::MAX; ++i)
+        hart::startable[i] = true;
+
     // Header fields are BE; be<T> converts them on access.
     if (static_cast<uint32_t>(fdt_ptr->magic) != static_cast<uint32_t>(FDT::MAGIC))
         PANIC("Wrong FDT header magic");
@@ -174,6 +192,8 @@ void init(const header *fdt_ptr) {
             else
                 PANIC("FDT exceeds maximum depth");
             stack[depth].is_cpus = !strcmp(name, "cpus");
+            stack[depth].is_cpu = startswith(name, "cpu@");
+            stack[depth].is_interrupt_controller = !strcmp(name, "interrupt-controller");
             stack[depth].is_memory = startswith(name, "memory@");
             stack[depth].is_rsvd_memory = !strcmp(name, "reserved-memory");
             continue;
@@ -181,7 +201,7 @@ void init(const header *fdt_ptr) {
         case FDT::END_NODE: {
             if (depth < 0)
                 PANIC("FDT_END_NODE before the first FDT_BEGIN_NODE");
-            const node_ctx &ctx = stack[depth];
+            auto &ctx = stack[depth];
             if (ctx.is_virtio and ctx.reg_set and ctx.irq_set) {
                 // Collect all virtio devices
                 if (virtio_device_count < MAX_VIRTIO_DEVICES) {
@@ -189,17 +209,20 @@ void init(const header *fdt_ptr) {
                     virtio_devices[virtio_device_count].irq = ctx.irq;
                     virtio_device_count++;
                 }
-            }
-            if (ctx.is_plic and ctx.reg_set) {
+            } else if (ctx.is_plic and ctx.reg_set and ctx.irq_set) {
                 plic::start_addr = static_cast<paddr_t>(ctx.reg_addr);
                 plic::end_addr = plic::start_addr + ctx.reg_size;
-            }
-            if (ctx.is_memory and ctx.reg_set) {
+                for (size_t i = 0; !ctx.irq_ext.empty() and i < plic::irq_ext_n; ++i)
+                    plic::irq_ext[i] = ctx.irq_ext.take_u32();
+            } else if (ctx.is_interrupt_controller and uninitialised != ctx.phandle and stack[depth - 1].is_cpu)
+                plic::hart_to_phandle[stack[depth - 1].reg_addr] = ctx.phandle;
+            else if (ctx.is_cpu and ctx.reg_set and ctx.reg_addr < hart::MAX)
+                hart::startable[ctx.reg_addr] = ctx.status_ok and ctx.has_mmu;
+            else if (ctx.is_memory and ctx.reg_set) {
                 free_ram_end = ctx.reg_addr + ctx.reg_size;
                 // printf("fdt::init: memory addr: 0x%lx, size: 0x%lx, calculated free_ram_end: %p\n", ctx.reg_addr,
                 //        ctx.reg_size, free_ram_end);
-            }
-            if (0 < depth and stack[depth - 1].is_rsvd_memory) {
+            } else if (0 < depth and stack[depth - 1].is_rsvd_memory) {
                 // We assume reserved memories are allocated at the start of RAM
                 auto kernel_base = reinterpret_cast<paddr_t>(__kernel_base);
                 if (ctx.reg_addr < kernel_base and kernel_base < (ctx.reg_addr + ctx.reg_size))
@@ -222,9 +245,7 @@ void init(const header *fdt_ptr) {
             // #address-cells/#size-cells describe how children encode their reg.
             if (!strcmp(prop_name, "#address-cells") and sizeof(be<uint32_t>) <= len) {
                 ctx.address_cells = static_cast<int>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
-                continue;
-            }
-            if (!strcmp(prop_name, "#size-cells") and sizeof(be<uint32_t>) <= len) {
+            } else if (!strcmp(prop_name, "#size-cells") and sizeof(be<uint32_t>) <= len) {
                 ctx.size_cells = static_cast<int>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 continue;
             }
@@ -239,14 +260,11 @@ void init(const header *fdt_ptr) {
                 fdt::clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 fdt::clk_freq_ms = fdt::clk_freq_sec / 1000u;
                 fdt::clk_freq_us = fdt::clk_freq_ms / 1000u;
-                continue;
-            }
-
-            if (!strcmp(prop_name, "compatible") and 0 < len) {
+            } else if (!strcmp(prop_name, "compatible") and len) {
                 const char *data = reinterpret_cast<const char *>(prop_data);
-                if (compat_has(data, len, "virtio,mmio"))
+                if (string_prop_has(data, len, "virtio,mmio"))
                     ctx.is_virtio = true;
-                else if (compat_has(data, len, "riscv,plic0") || compat_has(data, len, "sifive,plic-1.0.0"))
+                else if (string_prop_has(data, len, "riscv,plic0") || string_prop_has(data, len, "sifive,plic-1.0.0"))
                     ctx.is_plic = true;
                 continue;
             }
@@ -261,16 +279,26 @@ void init(const header *fdt_ptr) {
                 // - reg = <0x00 0x10001000 0x00 0x1000> with parent #addres-cells == 2 and #size-cells == 2
                 // - reg_addr = take_u64(2) → (0x00 << 32) | 0x10001000 → 0x0000000010001000
                 // - reg_size = take_u64(2) → (0x00 << 32) | 0x1000 → 0x0000000000001000
+                // For a cpu node, its parent.address_cells=1, parent.size_cells=0
                 ctx.reg_addr = cells.take_u64(parent.address_cells);
                 ctx.reg_size = cells.take_u64(parent.size_cells);
                 ctx.reg_set = true;
-                continue;
-            }
-            if (!strcmp(prop_name, "interrupts") and sizeof(be<uint32_t>) <= len) {
+            } else if (!strcmp(prop_name, "interrupts") and sizeof(be<uint32_t>) <= len) {
                 ctx.irq = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 ctx.irq_set = true;
-                continue;
-            }
+            } else if (!strcmp(prop_name, "interrupts-extended") and
+                       2 * sizeof(be<uint32_t>) <= len /* at least one pair */) {
+                ctx.irq_ext = cell_view{ span<const be<uint32_t>>(reinterpret_cast<const be<uint32_t> *>(prop_data),
+                                                                  len / sizeof(be<uint32_t>)) };
+                ctx.irq_set = true;
+            } else if (!strcmp(prop_name, "phandle") and sizeof(be<uint32_t>) <= len) {
+                ctx.phandle = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+            } else if (!strcmp(prop_name, "mmu-type") and len)
+                // VF2 is Sv39, virt 32 is Sv32, while virt 64 is Sv57
+                ctx.has_mmu = startswith(reinterpret_cast<const char *>(prop_data), "riscv,sv");
+            else if (!strcmp(prop_name, "status") and 4 <= len)
+                ctx.status_ok = string_prop_has(reinterpret_cast<const char *>(prop_data), len, "okay");
+
         } break;
         default:
             PANIC("Unkown token in FDT");

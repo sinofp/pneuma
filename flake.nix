@@ -89,6 +89,38 @@
           # TODO starfive_visionfive2_defconfig
           ubootQemu = uboot "qemu-riscv64_smode_defconfig";
 
+          customQemu =
+            (pkgs.qemu.override {
+              hostCpuTargets = [
+                "riscv64-softmmu"
+                "riscv32-softmmu"
+              ];
+              minimal = true;
+              gtkSupport = false;
+              sdlSupport = false;
+              pulseSupport = false;
+              pipewireSupport = false;
+              jackSupport = false;
+              spiceSupport = false;
+              smartcardSupport = false;
+              libiscsiSupport = false;
+              tpmSupport = false;
+              capstoneSupport = false;
+              alsaSupport = false;
+              guestAgentSupport = false;
+              numaSupport = false;
+              seccompSupport = false;
+              vncSupport = false;
+              usbredirSupport = false;
+              openGLSupport = false;
+              virglSupport = false;
+              rutabagaSupport = false;
+              uringSupport = false;
+            }).overrideAttrs
+              (old: {
+                patches = (old.patches or [ ]) ++ [ ./patches/qemu-jh7110.patch ];
+              });
+
         in
         {
           default = pkgs.mkShell {
@@ -99,33 +131,7 @@
               gdb-dashboard
               opensbi
               ubootQemu
-              (qemu.override {
-                hostCpuTargets = [
-                  "riscv64-softmmu"
-                  "riscv32-softmmu"
-                ];
-                minimal = true;
-                gtkSupport = false;
-                sdlSupport = false;
-                pulseSupport = false;
-                pipewireSupport = false;
-                jackSupport = false;
-                spiceSupport = false;
-                smartcardSupport = false;
-                libiscsiSupport = false;
-                tpmSupport = false;
-                capstoneSupport = false;
-                alsaSupport = false;
-                guestAgentSupport = false;
-                numaSupport = false;
-                seccompSupport = false;
-                vncSupport = false;
-                usbredirSupport = false;
-                openGLSupport = false;
-                virglSupport = false;
-                rutabagaSupport = false;
-                uringSupport = false;
-              })
+              customQemu
               dtc
               dosfstools # mkfs.vfat
               mtools # mcopy
@@ -474,12 +480,48 @@
 
           # Build kernel with embedded user programs
           mkKernel =
-            arch:
+            arch: ldScript:
             let
               cfg = archConfigs.${arch};
               libc = mkLibc arch;
               flags = mkFlags arch "${libc}/include" "${libc}/driver";
               doom = mkDoom arch;
+
+              # Link the rv64 kernel as a static-PIE (ET_DYN with R_RISCV_RELATIVE
+              # relocations). Combined with the boot-time relocation loop in main.cc,
+              # one binary boots at any DRAM base (virt @ 0x80200000, jh7110 @ 0x40200000).
+              # rv32 stays a fixed ET_EXEC (it is not compiled -fPIE).
+              # -Wl,-pie (not driver -pie, which clang's bare-metal toolchain ignores)
+              # forces lld to emit an ET_DYN with R_RISCV_RELATIVE relocations.
+              pieLink = lib.optionalString (arch == "riscv64") "-Wl,-pie -Wl,--no-dynamic-linker -Wl,-z,norelro";
+
+              readelf = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-readelf";
+
+              # Guard the static-PIE contract the main.cc boot loop depends on: the
+              # rv64 kernel must be an ET_DYN whose dynamic relocations are ALL
+              # R_RISCV_RELATIVE. Catches two silent regressions a toolchain/linker
+              # swap could introduce -- a dropped -pie (ET_EXEC, zero relocs -> kernel
+              # only works at its link address) or a reloc type the loop can't apply
+              # (e.g. R_RISCV_IRELATIVE). Both otherwise fault only on a shifted DRAM
+              # base (jh7110), never on virt. rv32 is ET_EXEC by design, so skip it.
+              pieGuard = lib.optionalString (arch == "riscv64") ''
+                echo "Verifying rv64 static-PIE relocations..."
+                if ! ${readelf} -h $out/kernel.elf | grep -q "Type:.*DYN"; then
+                  echo "ERROR: kernel.elf is not ET_DYN -- -pie was dropped; self-relocation is a no-op." >&2
+                  exit 1
+                fi
+                relcount=$(${readelf} -r $out/kernel.elf | grep -c "R_RISCV_RELATIVE" || true)
+                if [ "$relcount" -eq 0 ]; then
+                  echo "ERROR: no R_RISCV_RELATIVE relocations -- nothing to self-relocate." >&2
+                  exit 1
+                fi
+                if ${readelf} -r $out/kernel.elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" | grep -q .; then
+                  echo "ERROR: .rela.dyn has non-RELATIVE dynamic relocs the boot loop cannot apply:" >&2
+                  ${readelf} -r $out/kernel.elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" >&2
+                  exit 1
+                fi
+                echo "OK: ET_DYN with $relcount R_RISCV_RELATIVE relocations, no others."
+              '';
 
               # List all libc object files
               libcCxxObjs = map (
@@ -578,9 +620,9 @@
                 ${embedBin "doom" "${doom}/doom.bin"}
 
                 # Build kernel.elf with embedded user programs
-                ${clang} ${flags.kernel} \
+                ${clang} ${flags.kernel} ${pieLink} \
                   --ld-path=${lld} \
-                  -Wl,-Tkernel/kernel.ld \
+                  -Wl,-Tkernel/${ldScript} \
                   -Wl,-Map=$out/kernel.map \
                   -o $out/kernel.elf \
                   ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
@@ -592,6 +634,8 @@
                     )
                   } \
                   $out/doom.bin.o
+
+                ${pieGuard}
 
                 # Generate Image file for U-Boot booti
                 ${objcopy} -O binary $out/kernel.elf $out/Image
@@ -659,8 +703,8 @@
             };
 
           # Build both architectures
-          build32 = mkKernel "riscv32";
-          build64 = mkKernel "riscv64";
+          build32 = mkKernel "riscv32" "kernel.ld";
+          build64 = mkKernel "riscv64" "kernel.ld";
 
           # Build Doom for both architectures
           doom32 = mkDoom "riscv32";

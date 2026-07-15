@@ -1,0 +1,69 @@
+#!/usr/bin/env zsh
+
+# Regenerate patches/qemu-jh7110.patch from the out-of-tree QEMU clone.
+#
+# The jh7110 machine is developed in a QEMU checkout (default ../qemu) pinned
+# to v10.1.0 -- the version this repo's flake.lock builds. This script snapshots
+# the four touched files into a patch that flake.nix applies via qemu.overrideAttrs.
+#
+# Usage: gen-qemu-patch [path-to-qemu-clone]
+
+set -ue
+
+repo_root=${0:A:h}
+qemu_dir=${1:-$repo_root/../qemu}
+
+if [[ ! -d $qemu_dir/.git ]] {
+    print "Error: '$qemu_dir' is not a git checkout of QEMU" >&2
+    print "Usage: $0 [path-to-qemu-clone]" >&2
+    exit 1
+}
+
+# The patch is version-coupled: it only applies to the QEMU source flake.lock
+# builds (nixpkgs qemu 10.1.0). Refuse to snapshot a mismatched tree.
+want=v10.1.0
+have=$(git -C $qemu_dir describe --tags 2>/dev/null || print "unknown")
+if [[ $have != ${want}* ]] {
+    print "Error: ../qemu is at '$have', expected '$want'." >&2
+    print "The patch is coupled to the QEMU version flake.lock builds." >&2
+    print "Check out $want (or pass a matching clone) before regenerating." >&2
+    exit 1
+}
+
+new_files=(
+    hw/riscv/jh7110.c
+    include/hw/riscv/jh7110.h
+)
+files=(
+    $new_files
+    hw/riscv/meson.build
+    hw/riscv/Kconfig
+)
+
+# QEMU ships no clang-format; scripts/checkpatch.pl is the style authority.
+# Gate the snapshot on the files this patch creates. -f is whole-file mode:
+# patch mode would also demand SPDX/Signed-off-by, which only matter for
+# upstream submission. set -e aborts on style errors.
+(cd $qemu_dir && ./scripts/checkpatch.pl -f $new_files)
+
+# Make the untracked new files (jh7110.{c,h}) visible to `git diff HEAD`.
+# Intent-to-add is a no-op for files already tracked/staged.
+git -C $qemu_dir add -N $new_files
+
+mkdir -p $repo_root/patches
+out=$repo_root/patches/qemu-jh7110.patch
+
+# Explicit path list excludes build noise (e.g. subprojects/.wraplock).
+# --no-ext-diff bypasses any configured external differ (e.g. difftastic) so
+# we get a real unified diff; --no-color keeps it plain text.
+git -C $qemu_dir --no-pager diff --no-ext-diff --no-color \
+    --src-prefix=a/ --dst-prefix=b/ HEAD -- $files > $out
+
+if [[ ! -s $out ]] {
+    print "Error: produced an empty patch -- no changes found in $qemu_dir." >&2
+    exit 1
+}
+
+print "Wrote $out"
+git -C $qemu_dir diff HEAD --stat -- $files
+print "\nRemember to 'git add patches/qemu-jh7110.patch' so the flake can see it."

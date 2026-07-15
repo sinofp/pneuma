@@ -6,7 +6,7 @@
 
 namespace driver {
 
-constexpr size_t MAX_IRQ = 96; // QEMU virt uses irqs in the low 30s; ample headroom
+constexpr size_t MAX_IRQ = 0x90; // VF2 has 1-0x88
 
 // Returns the pid that owns `irq`, or -1 if unowned. Used by trap dispatch.
 proc::id_t owner(uint32_t irq);

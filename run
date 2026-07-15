@@ -6,23 +6,28 @@ set -ue
 
 # Architecture selection (default: rv32)
 # Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]
-local arch=rv32
+local model=rv32
 local debug=false
 local use_gdb=false
 local use_uboot=false
 local use_dts=false
 local use_gpu=false
 local smp=1
+local smp_set=false
 
 # Parse arguments
 while (( $# > 0 )) {
     case $1 {
         (rv32)
-            arch=rv32
+            model=rv32
             shift
             ;;
         (rv64)
-            arch=rv64
+            model=rv64
+            shift
+            ;;
+        (vf2)
+            model=vf2
             shift
             ;;
         (--debug)
@@ -47,11 +52,12 @@ while (( $# > 0 )) {
             ;;
         (--smp)
             smp=$2
+            smp_set=true
             shift 2
             ;;
         (*)
             print "Error: Unknown argument '$1'"
-            print "Usage: $0 [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]"
+            print "Usage: $0 [rv32|rv64|vf2] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]"
             exit 1
             ;;
     }
@@ -59,7 +65,7 @@ while (( $# > 0 )) {
 
 # Architecture-specific configuration
 local qemu abi
-case $arch {
+case $model {
     (rv32)
         qemu=qemu-system-riscv32
         abi=ilp32
@@ -68,24 +74,50 @@ case $arch {
         qemu=qemu-system-riscv64
         abi=lp64
         ;;
+    (vf2)
+        # VisionFive 2 Lite twin: rv64 on the jh7110 machine
+        qemu=qemu-system-riscv64
+        abi=lp64
+        ;;
 }
 
-print "Building for ${arch:u}..."
+# The jh7110 SoC is fixed 1×S7 + 4×U74; the machine's min_cpus is 2, so the
+# rv32/rv64 default of 1 would be rejected. Default vf2 to the full 5 harts
+# unless the user asked for a specific --smp.
+if [[ $model == vf2 && $smp_set == false ]] {
+    smp=5
+}
+
+# gdb can't attach on jh7110: it takes the ABI from hart 0 (the FPU-less S7,
+# flen 0) but the kernel is lp64d (flen 8), so riscv_gdbarch_init errors out at
+# connect ("bfd requires flen 8, but target has flen 0").
+if [[ $model == vf2 && $use_gdb == true ]] {
+    print "Error: gdb can't attach on vf2 -- the jh7110 hart 0 (S7) has no FPU,"
+    print "so gdb rejects the flen mismatch with the lp64d kernel at connect."
+    print "Use lldb instead: ./run vf2 --debug (without --gdb)."
+    exit 1
+}
+
+print "Building for ${model:u}..."
 
 # OpenSBI firmware path
 local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
+
+local arch=$model
+[[ $model == vf2 ]] && arch=rv64
 
 # Build kernel for selected architecture
 # nix build --no-substitute .#$arch -o result-$arch
 nix build .#$arch -o result-$arch
 
 local kernel_elf=result-$arch/kernel.elf
+local kernel_img=result-${arch}/Image
 local shell_elf=result-$arch/shell.elf
 local a_elf=result-$arch/a.elf
 local b_elf=result-$arch/b.elf
 
 # U-Boot is only available for RV64
-if [[ $use_uboot == true && $arch != rv64 ]] {
+if [[ $use_uboot == true && $model != rv64 ]] {
     print "Error: U-Boot boot is only supported for rv64"
     exit 1
 }
@@ -102,17 +134,27 @@ local qemu_kernel
 if [[ $use_uboot == true ]] {
     print "Boot chain: OpenSBI (M-mode) → U-Boot (S-mode) → Kernel (S-mode)"
     qemu_kernel=$UBOOT_QEMU
+} elif [[ $arch == rv64 ]] {
+    # The rv64 kernel is a static-PIE linked at 0x80200000. Feeding QEMU the ELF
+    # would pin it to that p_paddr — fine on virt (DRAM 0x80000000), but off the
+    # end of jh7110's DRAM (0x40000000). The flat Image carries no address, so
+    # QEMU loads it at the machine's boot address and the kernel self-relocates:
+    # a no-op on virt (0x80200000) and a -0x40000000 slide on jh7110 (0x40200000).
+    # One artifact boots both rv64 machines; rv32 (ET_EXEC, no reloc) uses its ELF.
+    qemu_kernel=$kernel_img
 } else {
     qemu_kernel=$kernel_elf
 }
 
-local qemu_machine="virt"
+local machine_name=virt
+[[ $model == vf2 ]] && machine_name=jh7110
+local qemu_machine=$machine_name
 if [[ $use_dts == true && $use_uboot == false ]] {
-    qemu_machine="virt,dumpdtb=virt-${arch}.dtb"
+    qemu_machine="${machine_name},dumpdtb=${machine_name}-${model}.dtb"
 }
 
 # Use FAT disk image from build output (copy to writable location)
-local disk_img=disk-$arch.img
+local disk_img=disk-$model.img
 cp result-$arch/disk.img $disk_img
 chmod +w $disk_img
 
@@ -132,7 +174,7 @@ keyboard_args="-device virtio-keyboard-device,bus=virtio-mmio-bus.$((virtio_bus+
 
 # Create boot disk for U-Boot if needed
 if [[ $use_uboot == true ]] {
-    local boot_img=boot-${arch}.img
+    local boot_img=boot-${model}.img
     print "Creating boot disk image: $boot_img"
 
     # Create disk image and format as FAT32 (whole-disk, no partition table)
@@ -140,7 +182,7 @@ if [[ $use_uboot == true ]] {
     mkfs.vfat -F 32 $boot_img >/dev/null
 
     # Copy Image to boot disk
-    mcopy -i $boot_img result-${arch}/Image ::Image
+    mcopy -i $boot_img $kernel_img ::Image
 
     # U-Boot enumerates virtio-blk devices in reverse MMIO address order,
     # so registering the boot disk last makes it appear as virtio 0 to U-Boot
@@ -164,7 +206,7 @@ local qemu_common_args="-machine $qemu_machine -smp $smp \
       $boot_disk_args $gpu_args"
 
 if [[ $use_dts == true && $use_uboot == true ]] {
-    local uboot_dts=virt-${arch}-uboot.dts
+    local uboot_dts=virt-${model}-uboot.dts
     rm -f $uboot_dts
     {
         print -r -- 'fdt addr $fdtcontroladdr' # Let U-Boot expand it, not ZSH
@@ -178,23 +220,23 @@ if [[ $use_dts == true && $use_uboot == true ]] {
 }
 
 if [[ $use_dts == true && $use_uboot == false ]] {
-    local dts=virt-${arch}.dts
+    local dts=${machine_name}-${model}.dts
     rm -f $dts
     $qemu ${(z)qemu_common_args} >/dev/null 2>&1 || true
-    dtc -I dtb -O dts -o $dts virt-${arch}.dtb
-    rm -f virt-${arch}.dtb
+    dtc -I dtb -O dts -o $dts ${machine_name}-${model}.dtb
+    rm -f ${machine_name}-${model}.dtb
     print "Wrote $dts"
     exit
 }
 
 if [[ $use_uboot == true && $debug == false ]] {
-    print "Running ${arch:u} via OpenSBI + U-Boot..."
+    print "Running ${model:u} via OpenSBI + U-Boot..."
 
     # TODO Running expect catches C-a prefix for QEMU
-    ./uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
+    ./uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$model.log
 
 } elif [[ $debug == true ]] {
-    print "Starting QEMU (${arch:u}) with GDB server on port 1234"
+    print "Starting QEMU (${model:u}) with GDB server on port 1234"
 
     # Get the compilation directory from debug info for source mapping
     local kernel_comp_dir=$(llvm-dwarfdump $kernel_elf | grep DW_AT_comp_dir | head -1 | sed -E 's|.*"(.*)".*|\1|')
@@ -206,6 +248,17 @@ if [[ $use_uboot == true && $debug == false ]] {
     $qemu ${(z)qemu_common_args} -s -S &
 
     local qemu_pid=$!
+
+    # On vf2 the flat Image self-relocates from the 0x80200000 link base down to
+    # jh7110's 0x40200000 DRAM, so kernel.elf's symbols sit 0x40000000 too high.
+    # Slide them to track the running code (virt loads at the link base — no slide).
+    # Only lldb reaches here: --gdb is rejected on vf2 (hart 0 has no FPU). lldb
+    # parses --slide as unsigned (rejects -0x...) and matches --file by basename,
+    # so pass the two's-complement wrap (0x80200000 + it = 0x40200000) and ${kernel_elf:t}.
+    local reloc_lldb=""
+    if [[ $model == vf2 ]] {
+        reloc_lldb="-o 'target modules load --file ${kernel_elf:t} --slide 0xffffffffc0000000'"
+    }
 
     # Prepare debugger command
     local debugger_cmd
@@ -226,6 +279,7 @@ if [[ $use_uboot == true && $debug == false ]] {
         debugger_cmd="
             lldb $kernel_elf \
                 -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
+                $reloc_lldb \
                 -o 'image add $shell_elf' \
                 -o 'image add $a_elf' \
                 -o 'image add $b_elf' \
@@ -245,9 +299,9 @@ if [[ $use_uboot == true && $debug == false ]] {
 } else {
     # Start QEMU normally
     if [[ $use_uboot == true ]] {
-        print "Running ${arch:u} via U-Boot..."
+        print "Running ${model:u} via U-Boot..."
     } else {
-        print "Running ${arch:u} kernel..."
+        print "Running ${model:u} kernel..."
     }
-    $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$arch.log
+    $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$model.log
 }
