@@ -47,22 +47,6 @@ constexpr unsigned long SYS_DMA_ALLOC = 16;
 constexpr unsigned long SYS_IRQ_WAIT = 17;
 constexpr unsigned long SYS_PAGE_WALK = 18;
 constexpr unsigned long SYS_IRQ_CLAIM = 19;
+constexpr unsigned long SYS_REBOOT = 20;
 
 constexpr int EOF = -1;
-
-namespace sbi {
-[[noreturn]]
-extern void shutdown();
-}
-
-namespace proc {
-extern void backtrace();
-}
-
-// TODO move to debug.h?
-#define PANIC(fmt, ...)                                                                \
-    do {                                                                               \
-        printf_unlocked("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-        proc::backtrace();                                                             \
-        sbi::shutdown();                                                               \
-    } while (0)

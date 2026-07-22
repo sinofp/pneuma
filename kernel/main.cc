@@ -31,6 +31,7 @@ constexpr uint64_t LINK_BASE = 0x80200000; // must match kernel.ld __link_base
 
 [[noreturn]]
 void kernel_secondary_main() {
+    hart::started[hart::id()] = true;
     while (!__atomic_load_n(&smp_ready, __ATOMIC_ACQUIRE)) {
     }
     trap::init_secondary();
@@ -43,7 +44,8 @@ void kernel_secondary_main() {
 
 } // namespace
 
-extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
+extern "C" [[noreturn]]
+void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_ptr) {
     if (!is_cold_boot)
         kernel_secondary_main();
     // relocate_self reads this flag pre-GOT to gate the one-time relocation, so it
@@ -55,6 +57,8 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
     // Whichever hart won OpenSBI's boot lottery becomes primary: it ticks the sleep queue
     // and owns the PLIC S-context for external interrupts.
     hart::primary = hart::id();
+    // After the BSS memset above, or the mark would be wiped.
+    hart::started[hart::id()] = true;
     printf("hart %d is the primary hart\n", hart::primary);
 
     fdt::init(fdt_ptr);
@@ -132,8 +136,9 @@ extern "C" void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::hea
         if (hart::id() == h)
             continue;
         if (!hart::startable[h])
-            printf("hart %d not startable because lack of MMU or has been disabled in device tree\n",
-                   static_cast<int>(h));
+            printf(
+                "hart %d not startable because it's SiFive S7, or lack of MMU, or has been disabled in device tree\n",
+                static_cast<int>(h));
         else if (auto err = sbi::hart_start(h, reinterpret_cast<xlen_t>(&boot), reinterpret_cast<xlen_t>(fdt_ptr));
                  0 != err)
             printf("hart %d not started (SBI error %ld)\n", static_cast<int>(h), err);

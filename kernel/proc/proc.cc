@@ -3,6 +3,7 @@
 #include "fdt/fdt.h"
 #include "lib/debug.h"
 #include "lib/lock.h"
+#include "lib/symbols.h"
 #include "mem/mem.h"
 #include "proc/qtab.h"
 #include "trap/csr.h"
@@ -89,23 +90,34 @@ void init_idle() {
 void idle_loop() {
     for (;;) {
         // printf("switched to idle process\n");
-        asm("wfi");
+        hart::wfi();
         proc::reschedule();
     }
 
     printf("I'm going to bed, bye.\n");
-    sbi::shutdown();
+    sbi::system_reset();
 }
 
-// TODO move to debug.h?
-void backtrace() {
-    if (auto pid = current().pid; bad_id(pid))
+void backtrace(xlen_t fp) {
+    if (auto *curr = currents[hart::id()]; nullptr == curr or bad_id(curr->pid))
         printf_unlocked("backtrace: fault happened before proc::init\n");
     else
-        printf_unlocked("backtrace pid=%d:\n", current().pid);
-    auto fp = reinterpret_cast<xlen_t>(__builtin_frame_address(0));
+        printf_unlocked("backtrace pid=%d:\n", curr->pid);
     printf_unlocked("```zsh\n for addr (\n");
-    while (fp) {
+
+    auto walkable = [&fp]() {
+        if (0 == fp or !is_aligned(fp, sizeof(xlen_t)))
+            return false;
+        // In per-proc kernel stack
+        if (auto lo = reinterpret_cast<xlen_t>(&proc::procs[0]), hi = reinterpret_cast<xlen_t>(&proc::procs[proc::MAX]);
+            lo < fp and fp <= hi)
+            return true;
+        // Or else, still in boot stack
+        return reinterpret_cast<xlen_t>(__image_end) < fp and fp <= reinterpret_cast<xlen_t>(__stack_top);
+    };
+
+    constexpr int MAX_DEPTH = 32; // must terminate even on a looping chain
+    for (int depth = 0; depth < MAX_DEPTH and walkable(); ++depth) {
         // RISC-V Calling Contenvion: The previous frame pointer and return address pair will reside just prior to the
         // current stack address held in fp. This puts the return address at fp - PTRSZ/8, and the previous frame
         // pointer at fp - 2 * PTRSZ/8.
@@ -122,7 +134,9 @@ process *create(span<const uint8_t> image, bool allocate_heap) {
     // bkl covers the slot scan and every alloc_frame below. Only called at boot today, but
     // uncontended acquisition is cheap and mem::alloc_frame asserts the lock is held.
     csr::intr_guard ig;
+    // printf("C%d?\n", static_cast<int>(hart::id()));
     lock::guard g{ lock::bkl };
+    // printf("C%d+\n", static_cast<int>(hart::id()));
 
     // Find an unused process control structure.
     process *proc = nullptr;
@@ -190,6 +204,7 @@ process *create(span<const uint8_t> image, bool allocate_heap) {
     proc->sp = sp;
     proc->state = SUSPENDED;
     proc->page_table = page_table;
+    // printf("C%d. Made pid %d\n", static_cast<int>(hart::id()), static_cast<int>(proc->pid));
     return proc;
 }
 
@@ -303,10 +318,13 @@ void chprio(process *proc, proc::prio_t prio) {
 
 void resume(process *proc) {
     csr::intr_guard ig;
+    // printf("R%d?\n", static_cast<int>(proc->pid));
     lock::guard g{ lock::bkl };
+    // printf("R%d+\n", static_cast<int>(proc->pid));
     if (proc->state != SUSPENDED)
         return;
     ready(proc, g);
+    // printf("R%d.\n", static_cast<int>(proc->pid));
 }
 
 void sleep_ms(int32_t delay) {

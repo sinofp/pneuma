@@ -1,4 +1,5 @@
 #include "dev/sbi.h"
+#include "lib/hart.h"
 
 namespace {
 
@@ -81,8 +82,11 @@ void set_timer(uint64_t stime_value) {
 
 // System reset (FID #0) struct sbiret sbi_system_reset(uint32_t reset_type, uint32_t reset_reason)
 [[noreturn]]
-void shutdown() {
-    sbi_call(0, 0, 0, 0, 0, 0, 0, EID::SRST);
+void system_reset(uint32_t reset_type) {
+    sbi_call(reset_type, 0, 0, 0, 0, 0, 0, EID::SRST);
+    // ecall can return before system really resets
+    for (;;)
+        hart::wfi();
 }
 
 // Hart start (FID #0) struct sbiret sbi_hart_start(unsigned long hartid, unsigned long start_addr, unsigned long

@@ -1,6 +1,7 @@
 #include "fdt/fdt.h"
 #include "lib/common.h"
 #include "lib/hart.h"
+#include "lib/panic.h"
 #include "lib/span.h"
 #include "lib/symbols.h"
 #include "trap/plic.h"
@@ -110,8 +111,9 @@ struct node_ctx {
     bool reg_set; // TODO remove?
     bool irq_set; // matches interrupts or interrupts-extended (only for PLIC) TODO remove?
     uint32_t phandle = uninitialised;
-    bool has_mmu = false;
+    bool has_mmu = false;  // TODO remove?
     bool status_ok = true; // absent is okay
+    bool is_s7 = false;
 };
 
 constexpr size_t max_depth = 16;
@@ -152,9 +154,6 @@ struct header {
 };
 
 void init(const header *fdt_ptr) {
-    for (auto i = 0uz; i < hart::MAX; ++i)
-        hart::startable[i] = true;
-
     // Header fields are BE; be<T> converts them on access.
     if (static_cast<uint32_t>(fdt_ptr->magic) != static_cast<uint32_t>(FDT::MAGIC))
         PANIC("Wrong FDT header magic");
@@ -217,7 +216,8 @@ void init(const header *fdt_ptr) {
             } else if (ctx.is_interrupt_controller and uninitialised != ctx.phandle and stack[depth - 1].is_cpu)
                 plic::hart_to_phandle[stack[depth - 1].reg_addr] = ctx.phandle;
             else if (ctx.is_cpu and ctx.reg_set and ctx.reg_addr < hart::MAX)
-                hart::startable[ctx.reg_addr] = ctx.status_ok and ctx.has_mmu;
+                // s7 in U-Boot FDT is marked with mmu-type = "riscv,sv39"; and status = "okay"
+                hart::startable[ctx.reg_addr] = ctx.status_ok and ctx.has_mmu and !ctx.is_s7;
             else if (ctx.is_memory and ctx.reg_set) {
                 free_ram_end = ctx.reg_addr + ctx.reg_size;
                 // printf("fdt::init: memory addr: 0x%lx, size: 0x%lx, calculated free_ram_end: %p\n", ctx.reg_addr,
@@ -266,6 +266,8 @@ void init(const header *fdt_ptr) {
                     ctx.is_virtio = true;
                 else if (string_prop_has(data, len, "riscv,plic0") || string_prop_has(data, len, "sifive,plic-1.0.0"))
                     ctx.is_plic = true;
+                else if (string_prop_has(data, len, "sifive,s7"))
+                    ctx.is_s7 = true;
                 continue;
             }
 

@@ -5,13 +5,14 @@
 set -ue
 
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]
+# Usage: ./run [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio]
 local model=rv32
 local debug=false
 local use_gdb=false
 local use_uboot=false
 local use_dts=false
 local use_gpu=false
+local no_virtio=false
 local smp=1
 local smp_set=false
 
@@ -28,6 +29,10 @@ while (( $# > 0 )) {
             ;;
         (vf2)
             model=vf2
+            shift
+            ;;
+        (board)
+            model=board
             shift
             ;;
         (--debug)
@@ -55,9 +60,13 @@ while (( $# > 0 )) {
             smp_set=true
             shift 2
             ;;
+        (--no-virtio)
+            no_virtio=true
+            shift
+            ;;
         (*)
             print "Error: Unknown argument '$1'"
-            print "Usage: $0 [rv32|rv64|vf2] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N]"
+            print "Usage: $0 [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio]"
             exit 1
             ;;
     }
@@ -69,15 +78,12 @@ case $model {
     (rv32)
         qemu=qemu-system-riscv32
         abi=ilp32
+        arch=rv32
         ;;
-    (rv64)
+    (rv64|vf2|board)
         qemu=qemu-system-riscv64
         abi=lp64
-        ;;
-    (vf2)
-        # VisionFive 2 Lite twin: rv64 on the jh7110 machine
-        qemu=qemu-system-riscv64
-        abi=lp64
+        arch=rv64
         ;;
 }
 
@@ -103,9 +109,6 @@ print "Building for ${model:u}..."
 # OpenSBI firmware path
 local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
 
-local arch=$model
-[[ $model == vf2 ]] && arch=rv64
-
 # Build kernel for selected architecture
 # nix build --no-substitute .#$arch -o result-$arch
 nix build .#$arch -o result-$arch
@@ -116,9 +119,23 @@ local shell_elf=result-$arch/shell.elf
 local a_elf=result-$arch/a.elf
 local b_elf=result-$arch/b.elf
 
+if [[ $model == board ]] {
+    print "Flashing the VF2 Lite over UART + USB fastboot..."
+    print "Power on / reset the board now; waiting for U-Boot autoboot on /dev/ttyACM0..."
+    ./uboot.exp --board /dev/ttyACM0 115200 $kernel_img
+    exit
+}
+
 # U-Boot is only available for RV64
 if [[ $use_uboot == true && $model != rv64 ]] {
     print "Error: U-Boot boot is only supported for rv64"
+    exit 1
+}
+
+# --no-virtio mimics the real VF2 Lite while U-Boot boot needs its 
+# boot disk and --gpu needs the virtio-gpu, so both conflict.
+if [[ $no_virtio == true && ( $use_uboot == true || $use_gpu == true ) ]] {
+    print "Error: --no-virtio conflicts with --uboot and --gpu"
     exit 1
 }
 
@@ -149,28 +166,40 @@ if [[ $use_uboot == true ]] {
 local machine_name=virt
 [[ $model == vf2 ]] && machine_name=jh7110
 local qemu_machine=$machine_name
+
+# virt always runs with svade=on: QEMU's walker updates A/D bits in hardware
+# by default, silently forgiving PTEs with A/D clear.
+# sstc=off avoids a QEMU stall seen with svade=on + Sstc and matches the U74.
+# vf2 needs no override: the jh7110 machine keeps the real sifive CPU models
+# and forces ext_svade on its harts itself (patches/qemu-jh7110.patch).
+local cpu_args=""
+if [[ $model != vf2 ]] {
+    cpu_args="-cpu $model,svade=on,sstc=off"
+}
 if [[ $use_dts == true && $use_uboot == false ]] {
     qemu_machine="${machine_name},dumpdtb=${machine_name}-${model}.dtb"
 }
 
-# Use FAT disk image from build output (copy to writable location)
-local disk_img=disk-$model.img
-cp result-$arch/disk.img $disk_img
-chmod +w $disk_img
-
-# Inject any local files from disk/ that aren't tracked by git (e.g. large game assets)
-for f in disk/*(.); {
-    mcopy -i $disk_img -o $f ::${f:t}
-}
-
 # Assign virtio-mmio bus slots in order of device registration
 local virtio_bus=0
-local data_disk_args keyboard_args boot_disk_args="" gpu_args=""
+local data_disk_args="" keyboard_args="" boot_disk_args="" gpu_args=""
 
-data_disk_args="-drive id=drive0,file=$disk_img,format=raw,if=none \
+if [[ $no_virtio == false ]] {
+    # Use FAT disk image from build output (copy to writable location)
+    local disk_img=disk-$model.img
+    cp result-$arch/disk.img $disk_img
+    chmod +w $disk_img
+
+    # Inject any local files from disk/ that aren't tracked by git (e.g. large game assets)
+    for f in disk/*(.); {
+        mcopy -i $disk_img -o $f ::${f:t}
+    }
+
+    data_disk_args="-drive id=drive0,file=$disk_img,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.$((virtio_bus++))"
 
-keyboard_args="-device virtio-keyboard-device,bus=virtio-mmio-bus.$((virtio_bus++))"
+    keyboard_args="-device virtio-keyboard-device,bus=virtio-mmio-bus.$((virtio_bus++))"
+}
 
 # Create boot disk for U-Boot if needed
 if [[ $use_uboot == true ]] {
@@ -191,7 +220,10 @@ if [[ $use_uboot == true ]] {
 }
 
 if [[ $use_gpu == true ]] {
-    gpu_args="-device virtio-gpu-device,bus=virtio-mmio-bus.$((virtio_bus++)) -display cocoa,zoom-to-fit=on"
+    gpu_args="-device virtio-gpu-device,bus=virtio-mmio-bus.$((virtio_bus++))"
+    if [[ $OSTYPE == darwin* ]] {
+        gpu_args+=" -display cocoa,zoom-to-fit=on"
+    }
 }
 
 local nographic_arg="--no-reboot -nographic -serial mon:stdio"
@@ -199,14 +231,14 @@ if [[ $use_gpu == true ]] {
     nographic_arg="--no-reboot -serial mon:stdio"
 }
 
-local qemu_common_args="-machine $qemu_machine -smp $smp \
+local qemu_common_args="-machine $qemu_machine -smp $smp $cpu_args \
       -bios $opensbi_fw -kernel $qemu_kernel \
       $nographic_arg \
       $data_disk_args $keyboard_args \
       $boot_disk_args $gpu_args"
 
 if [[ $use_dts == true && $use_uboot == true ]] {
-    local uboot_dts=virt-${model}-uboot.dts
+    local uboot_dts=dts/virt-${model}-uboot.dts
     rm -f $uboot_dts
     {
         print -r -- 'fdt addr $fdtcontroladdr' # Let U-Boot expand it, not ZSH
@@ -220,7 +252,7 @@ if [[ $use_dts == true && $use_uboot == true ]] {
 }
 
 if [[ $use_dts == true && $use_uboot == false ]] {
-    local dts=${machine_name}-${model}.dts
+    local dts=dts/${machine_name}-${model}.dts
     rm -f $dts
     $qemu ${(z)qemu_common_args} >/dev/null 2>&1 || true
     dtc -I dtb -O dts -o $dts ${machine_name}-${model}.dtb

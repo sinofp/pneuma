@@ -96,25 +96,7 @@
                 "riscv32-softmmu"
               ];
               minimal = true;
-              gtkSupport = false;
-              sdlSupport = false;
-              pulseSupport = false;
-              pipewireSupport = false;
-              jackSupport = false;
-              spiceSupport = false;
-              smartcardSupport = false;
-              libiscsiSupport = false;
-              tpmSupport = false;
-              capstoneSupport = false;
-              alsaSupport = false;
-              guestAgentSupport = false;
-              numaSupport = false;
-              seccompSupport = false;
-              vncSupport = false;
-              usbredirSupport = false;
-              openGLSupport = false;
-              virglSupport = false;
-              rutabagaSupport = false;
+              gtkSupport = !pkgs.stdenv.hostPlatform.isDarwin;
               uringSupport = false;
             }).overrideAttrs
               (old: {
@@ -135,6 +117,10 @@
               dtc
               dosfstools # mkfs.vfat
               mtools # mcopy
+              picocom
+              lrzsz # sb
+              android-tools # fastboot
+              expect # Missing on RPi
             ];
 
             shellHook = ''

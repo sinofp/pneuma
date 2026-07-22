@@ -248,6 +248,10 @@ void handle_syscall(trap::frame *f) {
     case SYS_PAGE_WALK:
         f->a0 = driver::sys_page_walk(f->a0, f->a1, f->a2);
         break;
+    case SYS_REBOOT:
+        printf("system reset requested by process %d\n", proc::current().pid);
+        sbi::system_reset(1);
+        PANIC("unreachable");
     default:
         PANIC("unexpected syscall a3=0x%lx\n", f->a3);
     }
@@ -255,9 +259,38 @@ void handle_syscall(trap::frame *f) {
 
 inline void set_next_timer_interrupt() { sbi::set_timer(csr::time::read() + timer_interrupt_ms * fdt::clk_freq_ms); }
 
+// Fatal-trap report: everything a serial-only board can give us. Registers come
+// from the saved frame; the backtrace walks the *trapped* context's fp (f->s0),
+// which the bounds checks reject when it's a user-space fp.
+[[noreturn]]
+void fatal_trap(trap::frame *f, csr::scause scause, sxlen_t stval, const char *what) {
+    panic::prologue();
+    xlen_t satp;
+    asm volatile("csrr %0, satp"
+                 : "=r"(satp));
+    printf_unlocked("FATAL TRAP: %s\n", what);
+    printf_unlocked("  scause=0x%lx stval=0x%lx sepc=0x%lx sstatus=0x%lx satp=0x%lx\n", static_cast<sxlen_t>(scause),
+                    stval, f->sepc, f->sstatus, satp);
+    printf_unlocked("  ra=0x%lx sp=0x%lx gp=0x%lx tp=0x%lx\n", f->ra, f->sp, f->gp, f->tp);
+    printf_unlocked("  t0=0x%lx t1=0x%lx t2=0x%lx t3=0x%lx t4=0x%lx t5=0x%lx t6=0x%lx\n", f->t0, f->t1, f->t2, f->t3,
+                    f->t4, f->t5, f->t6);
+    printf_unlocked("  a0=0x%lx a1=0x%lx a2=0x%lx a3=0x%lx a4=0x%lx a5=0x%lx a6=0x%lx a7=0x%lx\n", f->a0, f->a1, f->a2,
+                    f->a3, f->a4, f->a5, f->a6, f->a7);
+    printf_unlocked("  s0=0x%lx s1=0x%lx s2=0x%lx s3=0x%lx s4=0x%lx s5=0x%lx\n", f->s0, f->s1, f->s2, f->s3, f->s4,
+                    f->s5);
+    printf_unlocked("  s6=0x%lx s7=0x%lx s8=0x%lx s9=0x%lx s10=0x%lx s11=0x%lx\n", f->s6, f->s7, f->s8, f->s9, f->s10,
+                    f->s11);
+    proc::backtrace(f->s0);
+    sbi::system_reset();
+}
+
 } // namespace
 
 extern "C" void handle_trap(trap::frame *f) {
+    // Maybe the panicking hart's send_ipi take us here, or maybe it's just our own timer interrupt.
+    // So it's better to be before the switch-case
+    panic::park_if_panicking();
+
     auto scause = csr::scause::read();
     auto stval = csr::stval::read();
 
@@ -299,30 +332,21 @@ extern "C" void handle_trap(trap::frame *f) {
         break;
     }
     case IllegalInst:
-        PANIC("Illegal Instruction: stval=0x%lx, sepc=0x%lx\n", stval, f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Illegal Instruction");
     case LoadAddrMisaligned:
     case StoreAmoAddrMisaligned:
-        PANIC("Address Misaligned: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Address Misaligned");
     case LoadAccessFault:
-        PANIC("Load Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Load Access Fault");
     case StoreAmoAccessFault:
-        PANIC("Store/AMO Access Fault: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Store/AMO Access Fault");
     case LoadPageFault:
     case StoreAmoPageFault:
-        PANIC("Load/Store Page Fault (check memory mapping!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval,
-              f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Load/Store Page Fault (check memory mapping!)");
     case InstPageFault:
-        PANIC(
-            "Instruction Page Fault (check memory mapping/context switching!): scause=0x%lx, stval=0x%lx, sepc=0x%lx\n",
-            scause, stval, f->sepc);
-        break;
+        fatal_trap(f, scause, stval, "Instruction Page Fault (check memory mapping/context switching!)");
     default:
-        PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx\n", scause, stval, f->sepc);
+        fatal_trap(f, scause, stval, "Unexpected trap");
     }
 }
 

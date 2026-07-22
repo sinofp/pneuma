@@ -2,6 +2,44 @@
 
 set timeout -1
 
+if {[lindex $argv 0] eq "--board"} {
+    set tty   [lindex $argv 1]
+    set baud  [lindex $argv 2]
+    set image [lindex $argv 3]
+
+    # Configure the tty as a raw serial line; clocal so the blocking open below
+    # doesn't wait on carrier (USB-serial has no real DCD).
+    exec stty -F $tty $baud cs8 -cstopb -parenb -crtscts clocal raw -echo
+    set fd [open $tty {RDWR}]
+    fconfigure $fd -translation binary -buffering none
+    spawn -open $fd
+
+    send_user "Waiting for U-Boot autoboot (power on / reset the board)...\n"
+    expect {
+        "Hit any key to stop autoboot" { send "\r"; exp_continue }
+        "StarFive #" {}
+    }
+
+    send_user "Entering fastboot...\n"
+    send "fastboot usb 0\r"
+    #sleep 2
+
+    send_user "Staging $image over USB fastboot...\n"
+    exec fastboot stage $image >@ stdout 2>@ stderr
+
+    send_user "Booting...\n"
+    send "\x03"
+    expect "StarFive #"
+    # CONFIG_FASTBOOT_BUF_ADDR is 0x60000000 in StarFive's U-Boot
+    send "booti 0x60000000 - \$\{fdtcontroladdr\}\r"
+    send_user "\npress Ctrl-A x to detach and quit the console\n"
+    interact {
+        "\x01x" { send_user "\ndetached\n"; exit }
+    }
+    exit
+}
+
+# Spawn QEMU
 spawn {*}$argv
 
 expect {

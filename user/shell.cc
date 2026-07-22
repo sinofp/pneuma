@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/ipc.h>
 #include <sys/misc.h>
+#include <sys/syscall.h>
 
 namespace {
 
@@ -71,12 +72,18 @@ extern "C" void main(void) {
             fwrite(data, 1, len, f);
             fclose(f);
             printf("wrote %d bytes to %s\n", len, filename);
-        } else if (!strcmp(cmdline, "sleep")) {
+        } else if (!strcmp(cmdline, "sleep"))
             sleep_ms(3'000);
-        } else if (!strcmp(cmdline, "fault")) {
+        else if (!strcmp(cmdline, "reboot"))
+            reboot();
+        else if (!strcmp(cmdline, "fault")) {
             auto p = reinterpret_cast<int *>(1234);
             *p = 5678;
-        } else if (0 == strcmp(cmdline, "exit") or 0 == strcmp(cmdline, "q"))
+        } else if (!strcmp(cmdline, "kpanic"))
+            // Unknown syscall number PANICs the kernel: exercises the panic
+            // path (hart freeze, header, backtrace) end-to-end over serial.
+            syscall(999, 0, 0, 0);
+        else if (0 == strcmp(cmdline, "exit") or 0 == strcmp(cmdline, "q"))
             exit(0);
         else if (cmdline[0] != '\0')
             printf("unknown command: %s\n", cmdline);

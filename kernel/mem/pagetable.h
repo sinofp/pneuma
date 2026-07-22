@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lib/common.h"
+#include "lib/panic.h"
 #include "lib/span.h"
 
 namespace mem {
@@ -25,6 +26,8 @@ public:
         W = 1 << 2, // Writable
         X = 1 << 3, // Executable
         U = 1 << 4, // User (accessible in user mode)
+        A = 1 << 6, // Accessed
+        D = 1 << 7, // Dirty
     };
 
     friend constexpr flag operator|(flag a, flag b) {
@@ -59,7 +62,8 @@ public:
     }
 
     static constexpr auto make_leaf(paddr_t paddr, flag flags) {
-        return pte_t{ (paddr / PAGE_SIZE) << PTE_FLAG_BITS | static_cast<xlen_t>(flags | flag::V) };
+        // Also set A and D so U74's Svade behaviour is happy
+        return pte_t{ (paddr / PAGE_SIZE) << PTE_FLAG_BITS | static_cast<xlen_t>(flags | flag::V | flag::A | flag::D) };
     }
 };
 

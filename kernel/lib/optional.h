@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lib/common.h"
+#include "lib/panic.h"
 
 struct nullopt_t {};
 

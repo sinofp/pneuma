@@ -2,6 +2,7 @@
 
 #include "dev/mmio.h"
 #include "lib/hart.h"
+#include "lib/panic.h"
 #include "lib/types.h"
 
 namespace plic {

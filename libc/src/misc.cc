@@ -7,6 +7,8 @@ extern "C" {
 
 int sleep_ms(unsigned ms) { return syscall(SYS_SLEEP, ms, 0, 0); }
 
+void reboot() { syscall(SYS_REBOOT, 0, 0, 0); }
+
 int_pid ssend(void *src, size_t n, int_pid recipient) {
     return syscall(SYS_MP_SSEND, (unsigned long) src, n, recipient);
 }

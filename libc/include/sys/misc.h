@@ -13,6 +13,7 @@ struct input_event {
 };
 
 int sleep_ms(unsigned);
+void reboot();
 
 #ifdef __cplusplus
 }

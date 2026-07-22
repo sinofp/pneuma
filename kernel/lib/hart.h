@@ -12,6 +12,7 @@ constexpr size_t MAX = 5;
 extern size_t primary;
 
 extern bool startable[MAX];
+extern bool started[MAX];
 
 [[gnu::always_inline]]
 inline size_t id() {
@@ -19,6 +20,11 @@ inline size_t id() {
     asm volatile("mv %0, tp"
                  : "=r"(v));
     return v;
+}
+
+[[gnu::always_inline]]
+inline void wfi() {
+    asm volatile("wfi");
 }
 
 } // namespace hart

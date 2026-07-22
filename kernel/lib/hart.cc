@@ -2,5 +2,7 @@
 
 namespace hart {
 size_t primary;
-bool startable[MAX]; // fdt.cc inits it.
+// All false by BSS
+bool startable[MAX];
+bool started[MAX];
 } // namespace hart

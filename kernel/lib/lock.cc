@@ -1,5 +1,6 @@
 #include "lib/lock.h"
 #include "lib/common.h"
+#include "lib/panic.h"
 
 namespace lock {
 

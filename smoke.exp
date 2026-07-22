@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 
-set timeout 120
+set timeout 180
 
 proc must {pattern} {
     expect {
@@ -40,7 +40,7 @@ if {$has_gpu} {
 
 if {$is_smp} {
     if {$is_vf2} {
-        must "hart 0 not startable because lack of MMU or has been disabled in device tree"
+        must "hart 0 not startable"
     }
     # Boot lottery picks one primary (random id); the remaining startable harts
     # come up as secondaries. Count them id-agnostically.

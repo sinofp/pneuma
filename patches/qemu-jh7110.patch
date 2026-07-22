@@ -1,5 +1,5 @@
 diff --git a/hw/riscv/Kconfig b/hw/riscv/Kconfig
-index fc9c35bd98..c0a57faf53 100644
+index fc9c35b..c0a57fa 100644
 --- a/hw/riscv/Kconfig
 +++ b/hw/riscv/Kconfig
 @@ -9,6 +9,15 @@ config IBEX
@@ -20,10 +20,10 @@ index fc9c35bd98..c0a57faf53 100644
      default y
 diff --git a/hw/riscv/jh7110.c b/hw/riscv/jh7110.c
 new file mode 100644
-index 0000000000..f6448b32e5
+index 0000000..bfded07
 --- /dev/null
 +++ b/hw/riscv/jh7110.c
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,393 @@
 +/*
 + * StarFive JH7110 SoC machine (VisionFive 2 Lite twin)
 + *
@@ -304,6 +304,21 @@ index 0000000000..f6448b32e5
 +    sysbus_realize(SYS_BUS_DEVICE(&s->u_cpus), &error_fatal);
 +
 +    /*
++     * Real U74/S7 silicon predates Svadu: an access through a PTE with A=0
++     * (or a store through D=0) raises a page fault instead of updating the
++     * bit (Svade behaviour). QEMU's sifive CPU models leave ext_svade unset,
++     * so the softmmu walker silently updates A/D and hides missing bits that
++     * wedge the real board. Poke cfg directly: vendor models reject the
++     * user-facing property ("does not allow enabling extensions"), and the
++     * walker reads cfg at translation time, so a post-realize set is
++     * effective. Done before FDT creation so riscv,isa strings include it.
++     */
++    s->s_cpus.harts[0].cfg.ext_svade = true;
++    for (int i = 0; i < num_harts - 1; ++i) {
++        s->u_cpus.harts[i].cfg.ext_svade = true;
++    }
++
++    /*
 +     * CLINT: SWI + MTIMER at the 4 MHz JH7110 timebase.
 +     * provide_rdtime=false, as on real silicon: the U74 has no time CSR.
 +     * rdtime traps and OpenSBI emulates it from the memory-mapped mtime
@@ -403,7 +418,7 @@ index 0000000000..f6448b32e5
 +
 +type_init(jh7110_machine_register_types)
 diff --git a/hw/riscv/meson.build b/hw/riscv/meson.build
-index 2a8d5b136c..90f2b08ec0 100644
+index 2a8d5b1..90f2b08 100644
 --- a/hw/riscv/meson.build
 +++ b/hw/riscv/meson.build
 @@ -7,6 +7,7 @@ riscv_ss.add(when: 'CONFIG_RISCV_VIRT', if_true: files('virt.c'))
@@ -416,7 +431,7 @@ index 2a8d5b136c..90f2b08ec0 100644
  riscv_ss.add(when: 'CONFIG_ACPI', if_true: files('virt-acpi-build.c'))
 diff --git a/include/hw/riscv/jh7110.h b/include/hw/riscv/jh7110.h
 new file mode 100644
-index 0000000000..dba7b648c2
+index 0000000..dba7b64
 --- /dev/null
 +++ b/include/hw/riscv/jh7110.h
 @@ -0,0 +1,41 @@

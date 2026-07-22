@@ -11,7 +11,7 @@ void init();
 void init_idle();
 [[noreturn]]
 void idle_loop();
-void backtrace();
+void backtrace(xlen_t);
 
 using id_t =
     intptr_t; // Signed, so it can convey error code. PTRSZ, so passing by register for syscall preserves signess

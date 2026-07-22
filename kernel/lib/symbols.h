@@ -4,7 +4,7 @@
 
 extern "C" {
 // BSS and stack
-extern uint8_t __bss[], __bss_end[], __stack_top[];
+extern uint8_t __bss[], __bss_end[], __image_end[], __stack_top[];
 
 // Memory regions
 extern uint8_t __kernel_base[], __free_ram[];

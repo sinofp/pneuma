@@ -16,6 +16,7 @@
 #define SYS_IRQ_WAIT   17
 #define SYS_PAGE_WALK  18
 #define SYS_IRQ_CLAIM  19
+#define SYS_REBOOT     20
 
 // Raw syscall interface
 #ifdef __cplusplus
