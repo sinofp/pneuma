@@ -1,0 +1,68 @@
+#!/usr/bin/env zsh
+# Stage the pristine doomgeneric tree ($1) into a build directory ($2), applying
+# the fixups Pneuma needs, and print the staged .c files (one absolute path per
+# line) so a build system can pick them up without hardcoding 78 filenames.
+#
+#   patch-doomgeneric.sh <upstream-src-root> <dest-dir>   > sources.list
+#
+# Upstream is a pinned Nix store path, so the file list only ever changes when
+# the pinned rev does -- this is not project-source globbing.
+#
+# Staging is idempotent: each file is generated to a temp and only replaces the
+# destination when the contents actually differ. Re-running must not touch a
+# single mtime, or every reconfigure would rebuild all 78 translation units.
+set -ue
+
+local src=$1/doomgeneric
+local dst=$2
+
+mkdir -p $dst
+
+# Platform backends and subsystems Pneuma replaces or does not build:
+#   doomgeneric_*.c  -- upstream platform layers; ours is user/doomgeneric_rv.c
+#   i_sdl*/i_allegro*/i_cdmus/gusconf/mus2mid -- sound, music, CD audio
+#   icon.c           -- unused window icon
+#   m_fixed.c        -- miscompiles on rv32; m_fixed.h carries what we need
+local drop='^doomgeneric_.*\.c$|^i_sdlmusic\.c$|^i_sdlsound\.c$|^i_allegro.*\.c$|^i_cdmus\.c$|^gusconf\.c$|^mus2mid\.c$|^icon\.c$|^m_fixed\.c$'
+
+stage() {
+    local from=$1
+    local base=$2
+    local to=$dst/$base
+
+    # <sys/types.h> and <inttypes.h> are freestanding-hostile; <stdint.h> is what
+    # the code actually wants.
+    sed -e 's|#include <sys/types.h>|#include <stdint.h>|' \
+        -e 's|#include <inttypes.h>|#include <stdint.h>|' \
+        $from > $to.tmp
+
+    # unistd.h (isatty, behind a false #if) and assert.h (unused) have no
+    # freestanding equivalent, so those includes just go away.
+    case $base {
+        (i_system.c) sed -i 's|#include <unistd.h>||' $to.tmp ;;
+        (sha1.c)     sed -i 's|#include <assert.h>||' $to.tmp ;;
+    }
+
+    if { cmp -s $to.tmp $to } {
+        rm -f $to.tmp
+    } else {
+        mv $to.tmp $to
+    }
+}
+
+local f
+for f in $src/*.h(.); {
+    stage $f ${f:t}
+}
+
+for f in $src/*.c(.); {
+    local base=${f:t}
+    if [[ $base =~ $drop ]] {
+        # Drop a file that a previous run may have staged, so flipping the list
+        # does not leave an orphan behind to be compiled.
+        rm -f $dst/$base
+        continue
+    }
+    stage $f $base
+    print $dst/$base
+}

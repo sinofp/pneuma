@@ -1,0 +1,22 @@
+#!/usr/bin/env zsh
+# Emit an assembly stub that embeds a flat binary as
+# _binary_<sym>_bin_{start,end,size} (the same symbols objcopy -O binary would
+# create from a named .o, but decoupled from the input filename).
+#
+#   gen-incbin.sh <sym> <abs-path-to.bin>   > out.S
+#
+# <sym> must already have '-' rewritten to '_' by the caller.
+set -ue
+local sym=$1
+local bin=$2
+cat <<EOF
+.section .rodata
+.global _binary_${sym}_bin_start
+.global _binary_${sym}_bin_end
+.global _binary_${sym}_bin_size
+.balign 8
+_binary_${sym}_bin_start:
+.incbin "${bin}"
+_binary_${sym}_bin_end:
+.set _binary_${sym}_bin_size, _binary_${sym}_bin_end - _binary_${sym}_bin_start
+EOF

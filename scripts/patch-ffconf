@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+# Emit FatFs' ffconf.h with the two settings Pneuma needs, reading the pristine
+# header from the (read-only) source tree given as $1.
+#
+#   FF_CODE_PAGE 437  -- pick one OEM page so ff.c stops pulling in the tables
+#   FF_FS_NORTC  1    -- no RTC on this target, drops the get_fattime() dep
+#
+# Kept as a script rather than inline in CMakeLists.txt, same as gen-incbin.sh /
+# mkdisk.sh / pie-guard.sh / patch-doomgeneric.sh: the build config wires steps
+# together, the scripts say what each step does.
+#
+# Currently unused -- CMakeLists.txt patches ffconf.h inline via
+# file(REGEX REPLACE ...) instead, since the copy-if-different guarantee is
+# easier to get right there. Kept for parity if that ever changes.
+set -ue
+
+local src=$1
+
+sed -e 's|^#define FF_CODE_PAGE.*|#define FF_CODE_PAGE 437|' \
+    -e 's|^#define FF_FS_NORTC.*|#define FF_FS_NORTC 1|' \
+    $src/source/ffconf.h

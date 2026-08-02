@@ -1,0 +1,35 @@
+#!/usr/bin/env zsh
+# Guard the static-PIE contract the main.cc boot loop depends on: the rv64
+# kernel must be an ET_DYN whose dynamic relocations are ALL R_RISCV_RELATIVE.
+# Catches two silent regressions a toolchain/linker swap could introduce -- a
+# dropped -pie (ET_EXEC, zero relocs -> kernel only works at its link address)
+# or a reloc type the loop can't apply (e.g. R_RISCV_IRELATIVE). Both otherwise
+# fault only on a shifted DRAM base (jh7110), never on virt.
+#
+#   pie-guard.sh <llvm-readelf> <kernel.elf> [stamp]
+#
+# The optional stamp file is touched on success, so a build system can model the
+# check as a real graph node (with an output) rather than an untracked hook.
+set -ue
+local readelf=$1
+local elf=$2
+local stamp=${3-}
+
+print "Verifying rv64 static-PIE relocations..."
+if ! { $readelf -h $elf | grep -q "Type:.*DYN" } {
+    print "ERROR: kernel.elf is not ET_DYN -- -pie was dropped; self-relocation is a no-op." >&2
+    exit 1
+}
+local relcount=$($readelf -r $elf | grep -c "R_RISCV_RELATIVE" || true)
+if (( relcount == 0 )) {
+    print "ERROR: no R_RISCV_RELATIVE relocations -- nothing to self-relocate." >&2
+    exit 1
+}
+if { $readelf -r $elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" | grep -q . } {
+    print "ERROR: .rela.dyn has non-RELATIVE dynamic relocs the boot loop cannot apply:" >&2
+    $readelf -r $elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" >&2
+    exit 1
+}
+print "OK: ET_DYN with $relcount R_RISCV_RELATIVE relocations, no others."
+
+[[ -n $stamp ]] && : > $stamp

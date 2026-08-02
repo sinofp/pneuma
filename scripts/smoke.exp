@@ -2,6 +2,8 @@
 
 set timeout 180
 
+set repo_root [file dirname [file dirname [file normalize [info script]]]]
+
 proc must {pattern} {
     expect {
         -exact $pattern {}
@@ -13,7 +15,7 @@ proc must {pattern} {
 set has_gpu [expr {"--gpu" in $argv}]
 set is_vf2 [expr {"vf2" in $argv}]
 
-# Mirror ./run's -smp default: 1 for virt, 5 for the jh7110 (fixed 1×S7 + 4×U74).
+# Mirror ./scripts/run's -smp default: 1 for virt, 5 for the jh7110 (fixed 1×S7 + 4×U74).
 set smp 1
 set smp_idx [lsearch -exact $argv "--smp"]
 if {$smp_idx >= 0} {
@@ -27,7 +29,7 @@ set is_smp [expr {$smp > 1}]
 # (the MMU-less S7) is reported not-startable and never comes up.
 set ups [expr {$smp - 1 - $is_vf2}]
 
-spawn ./run {*}$argv
+spawn $repo_root/scripts/run {*}$argv
 
 # Kernel boot lines print before user procs run, so they arrive unmangled.
 must "Process created: libc-test (5)"

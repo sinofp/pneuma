@@ -4,6 +4,8 @@
 
 set -u
 
+local repo_root=${0:A:h:h}
+
 local -a bases=(rv32 rv64 "rv64 --uboot")
 local -a configs=(vf2)
 local base gpu smp
@@ -19,7 +21,7 @@ local -a passed failed
 local cfg
 for cfg in $configs; {
     print -n "matrix: ${(r:30:)cfg}"
-    if { ./smoke.exp ${(z)cfg} >/dev/null 2>&1 } {
+    if { $repo_root/scripts/smoke.exp ${(z)cfg} >/dev/null 2>&1 } {
         print "PASS"
         passed+=$cfg
     } else {

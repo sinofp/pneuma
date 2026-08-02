@@ -4,8 +4,15 @@
 
 set -ue
 
+# Locate the repo root regardless of the caller's cwd or how this script was
+# found ($0 is the resolved path even via a bare PATH lookup), then operate
+# from there -- every relative path below (build/, disk/, result-$arch, ...)
+# and every sibling-script call assumes cwd == repo root.
+local repo_root=${0:A:h:h}
+cd $repo_root
+
 # Architecture selection (default: rv32)
-# Usage: ./run [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio]
+# Usage: ./run [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio] [--nix]
 local model=rv32
 local debug=false
 local use_gdb=false
@@ -13,6 +20,7 @@ local use_uboot=false
 local use_dts=false
 local use_gpu=false
 local no_virtio=false
+local use_nix=false
 local smp=1
 local smp_set=false
 
@@ -64,9 +72,13 @@ while (( $# > 0 )) {
             no_virtio=true
             shift
             ;;
+        (--nix)
+            use_nix=true
+            shift
+            ;;
         (*)
             print "Error: Unknown argument '$1'"
-            print "Usage: $0 [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio]"
+            print "Usage: $0 [rv32|rv64|vf2|board] [--debug] [--gdb] [--uboot] [--dts] [--gpu] [--smp N] [--no-virtio] [--nix]"
             exit 1
             ;;
     }
@@ -109,20 +121,38 @@ print "Building for ${model:u}..."
 # OpenSBI firmware path
 local opensbi_fw=$QEMU_OPENSBI/share/opensbi/$abi/generic/firmware/fw_dynamic.bin
 
-# Build kernel for selected architecture
-# nix build --no-substitute .#$arch -o result-$arch
-nix build .#$arch -o result-$arch
+# Build kernel for selected architecture.
+#
+# Default is the CMake/Ninja build: header-aware and incremental, so a one-file
+# edit relinks instead of recompiling the world. --nix takes the hermetic
+# derivation path instead (use it for release/CI, or to cross-check a result).
+# Both drop the same artifact set -- kernel.elf, Image, disk.img, *.elf -- so
+# everything downstream only needs the directory.
+local artifacts
+if [[ $use_nix == true ]] {
+    # nix build --no-substitute .#$arch -o result-$arch
+    nix build .#$arch -o result-$arch
+    artifacts=result-$arch
+} else {
+    # Configure once; after that Ninja re-runs CMake itself when the config changes.
+    if [[ ! -f build/$arch/CMakeCache.txt ]] {
+        cmake -B build/$arch -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv${arch#rv}.cmake
+    }
+    cmake --build build/$arch
+    artifacts=build/$arch
+}
 
-local kernel_elf=result-$arch/kernel.elf
-local kernel_img=result-${arch}/Image
-local shell_elf=result-$arch/shell.elf
-local a_elf=result-$arch/a.elf
-local b_elf=result-$arch/b.elf
+local kernel_elf=$artifacts/kernel.elf
+local kernel_img=$artifacts/Image
+local shell_elf=$artifacts/shell.elf
+local a_elf=$artifacts/a.elf
+local b_elf=$artifacts/b.elf
 
 if [[ $model == board ]] {
     print "Flashing the VF2 Lite over UART + USB fastboot..."
     print "Power on / reset the board now; waiting for U-Boot autoboot on /dev/ttyACM0..."
-    ./uboot.exp --board /dev/ttyACM0 115200 $kernel_img
+    ./scripts/uboot.exp --board /dev/ttyACM0 115200 $kernel_img
     exit
 }
 
@@ -187,13 +217,17 @@ local data_disk_args="" keyboard_args="" boot_disk_args="" gpu_args=""
 if [[ $no_virtio == false ]] {
     # Use FAT disk image from build output (copy to writable location)
     local disk_img=disk-$model.img
-    cp result-$arch/disk.img $disk_img
+    cp $artifacts/disk.img $disk_img
     chmod +w $disk_img
 
     # Inject any local files from disk/ that aren't tracked by git (e.g. large game assets)
     for f in disk/*(.); {
         mcopy -i $disk_img -o $f ::${f:t}
     }
+
+    # DOOM1.WAD is fetched hermetically by the flake (see flake.nix) instead of
+    # requiring a manual drop into disk/ -- inject it the same way if present.
+    [[ -n ${DOOM_WAD-} ]] && mcopy -i $disk_img -o $DOOM_WAD ::DOOM1.WAD
 
     data_disk_args="-drive id=drive0,file=$disk_img,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.$((virtio_bus++))"
@@ -223,6 +257,13 @@ if [[ $use_gpu == true ]] {
     gpu_args="-device virtio-gpu-device,bus=virtio-mmio-bus.$((virtio_bus++))"
     if [[ $OSTYPE == darwin* ]] {
         gpu_args+=" -display cocoa,zoom-to-fit=on"
+    } elif [[ -z ${DISPLAY:-} && -z ${WAYLAND_DISPLAY:-} ]] {
+        # Headless host: QEMU's default backend is gtk, which aborts at startup
+        # with "gtk initialization failed". The guest still drives virtio-gpu
+        # into its framebuffer, so the gpu server and doom stay exercised (and
+        # smoke.exp still sees I_InitGraphics on the serial console) -- only the
+        # host-side presentation is dropped.
+        gpu_args+=" -display none"
     }
 }
 
@@ -265,7 +306,7 @@ if [[ $use_uboot == true && $debug == false ]] {
     print "Running ${model:u} via OpenSBI + U-Boot..."
 
     # TODO Running expect catches C-a prefix for QEMU
-    ./uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$model.log
+    ./scripts/uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$model.log
 
 } elif [[ $debug == true ]] {
     print "Starting QEMU (${model:u}) with GDB server on port 1234"

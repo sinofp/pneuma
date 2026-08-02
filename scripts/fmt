@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+
+set -ue
+setopt extended_glob
+local repo_root=${0:A:h:h}
+cd $repo_root
+
+clang-format -i **/*.{h,cc,c}~build/**(N)
+nixfmt flake.nix
+# TODO cmake-format?

@@ -2,6 +2,8 @@
 
 set timeout -1
 
+set repo_root [file dirname [file dirname [file normalize [info script]]]]
+
 if {[lindex $argv 0] eq "--board"} {
     set tty   [lindex $argv 1]
     set baud  [lindex $argv 2]

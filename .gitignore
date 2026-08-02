@@ -9,3 +9,5 @@ compile_commands.json
 .gdb_history
 *.WAD
 log*
+# CMake out-of-tree build directories
+/build/

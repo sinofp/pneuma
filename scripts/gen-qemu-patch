@@ -10,7 +10,7 @@
 
 set -ue
 
-repo_root=${0:A:h}
+repo_root=${0:A:h:h}
 qemu_dir=${1:-$repo_root/../qemu}
 
 if [[ ! -d $qemu_dir/.git ]] {

@@ -15,24 +15,59 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
 
-      # Architecture configurations
-      # IMAD: base integer + integer multiply/divide + double-float for DOOM and Atomic for SMP
-      # zicsr: CSR instructions for kernel
-      # zifencei: FENCE.I instruction for memory fences
-      archConfigs = {
-        riscv32 = {
-          target = "riscv32-unknown-elf";
-          elfFormat = "elf32-littleriscv";
-          march = "rv32imad_zicsr_zifencei";
-          mabi = "ilp32d";
-        };
-        riscv64 = {
-          target = "riscv64-unknown-elf";
-          elfFormat = "elf64-littleriscv";
-          march = "rv64imad_zicsr_zifencei";
-          mabi = "lp64d";
-        };
+      # Below are all shared between devShells and packages
+
+      toolchainFor = pkgs: {
+        clang = pkgs.llvmPackages_latest.clang-unwrapped;
+        lld = pkgs.llvmPackages_latest.lld;
+        bintools = pkgs.llvmPackages_latest.bintools-unwrapped; # llvm-nm, llvm-objdump, llvm-objcopy, llvm-ar, etc.
       };
+      
+      nativeBuildInputsFor =
+        pkgs: with pkgs; [
+          cmake
+          ninja
+          dosfstools # mkfs.vfat
+          mtools # mcopy
+          zsh # scripts/*
+          (toolchainFor pkgs).bintools # clang and lld will be included in commonEnvFor to avoid Apple's variant
+        ];
+
+      commonEnvFor =
+        pkgs:
+        let
+          t = toolchainFor pkgs;
+        in
+        {
+          CLANG = "${t.clang}/bin/clang";
+          LLD = "${t.lld}/bin/ld.lld";
+          FATFS_SRC = "${fatfsSrcFor pkgs}";
+          DOOMGENERIC_SRC = "${doomgenericSrcFor pkgs}";
+        };
+
+      fatfsSrcFor =
+        pkgs:
+        pkgs.fetchzip {
+          url = "https://elm-chan.org/fsw/ff/arc/ff16.zip";
+          hash = "sha256-FyN+We8M68pxtltRrRgc8L8bpWhsnQMYfRLxIQNE1Bg=";
+          stripRoot = false;
+        };
+
+      doomgenericSrcFor =
+        pkgs:
+        pkgs.fetchFromGitHub {
+          owner = "ozkl";
+          repo = "doomgeneric";
+          rev = "fc601639494e089702a1ada082eb51aaafc03722";
+          hash = "sha256-JGa7gTvSvxlmCLw9E+RDMt5RRjorNuA0GnC1kU9xnZ0=";
+        };
+
+      doom1WadFor =
+        pkgs:
+        pkgs.fetchurl {
+          url = "https://dav.emptystack.top/public/DOOM1.WAD";
+          hash = "sha256-HX1DvlAeZ9kn5BXguPPinDvzMHXoWXIYFvZSpSbKx3E=";
+        };
 
     in
     {
@@ -40,6 +75,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          t = toolchainFor pkgs;
 
           # Fetch pre-built OpenSBI firmware binaries
           opensbi-fw = pkgs.fetchurl {
@@ -55,7 +91,7 @@
 
           # Create a clang with --target wrapper for U-Boot
           clangRiscv = pkgs.writeShellScriptBin "clang-riscv64" ''
-            exec ${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang --target=riscv64-unknown-elf "$@"
+            exec ${t.clang}/bin/clang --target=riscv64-unknown-elf "$@"
           '';
 
           inherit (pkgs.callPackage "${nixpkgs}/pkgs/misc/uboot" { }) buildUBoot;
@@ -74,9 +110,9 @@
                 "LLVM=1"
                 "LLVM_IAS=1"
                 "CC=${clangRiscv}/bin/clang-riscv64"
-                "LD=${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
-                "OBJCOPY=${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy"
-                "AR=${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-ar"
+                "LD=${t.lld}/bin/ld.lld"
+                "OBJCOPY=${t.bintools}/bin/llvm-objcopy"
+                "AR=${t.bintools}/bin/llvm-ar"
               ];
               # Disable EFI loader and self-tests which have host architecture detection issues
               extraConfig = ''
@@ -103,32 +139,34 @@
                 patches = (old.patches or [ ]) ++ [ ./patches/qemu-jh7110.patch ];
               });
 
+          nativeBuildInputs = nativeBuildInputsFor pkgs;
+
+          commonEnv = commonEnvFor pkgs;
         in
         {
           default = pkgs.mkShell {
-            buildInputs = with pkgs; [
-              # Unwrapped LLVM/clang for bare-metal RISC-V development
-              llvmPackages_latest.clang-unwrapped
-              llvmPackages_latest.bintools-unwrapped # includes lld, llvm-nm, llvm-objdump, etc.
-              gdb-dashboard
-              opensbi
-              ubootQemu
-              customQemu
-              dtc
-              dosfstools # mkfs.vfat
-              mtools # mcopy
-              picocom
-              lrzsz # sb
-              android-tools # fastboot
-              expect # Missing on RPi
-            ];
+            buildInputs =
+              (with pkgs; [
+                gdb-dashboard
+                opensbi
+                ubootQemu
+                customQemu
+                dtc
+                picocom
+                lrzsz # sb
+                android-tools # fastboot
+                expect # Missing on RPi
+              ])
+              ++ nativeBuildInputs;
 
             shellHook = ''
+              ${pkgs.lib.concatStrings (
+                pkgs.lib.mapAttrsToList (name: value: "export ${name}=\"${value}\"\n") commonEnv
+              )}
               export QEMU_OPENSBI="${opensbi}/share/opensbi"
               export UBOOT_QEMU="${ubootQemu}/u-boot.bin"
-              export CLANG="${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang"
-              export LLD="${pkgs.llvmPackages_latest.lld}/bin/ld.lld"
-              export PATH="${ubootQemu}:$PWD:$PATH" # mkimage (from U-Boot), run, fmt
+              export PATH="${ubootQemu}:$PWD/scripts:$PWD:$PATH" # mkimage (from U-Boot), run, fmt
+              export DOOM_WAD="${doom1WadFor pkgs}"
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"
               echo "LLD: $LLD"
@@ -144,566 +182,51 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
-          clang = "${pkgs.llvmPackages_latest.clang-unwrapped}/bin/clang";
-          objcopy = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-objcopy";
-          lld = "${pkgs.llvmPackages_latest.lld}/bin/ld.lld";
 
-          # Convert an ELF to a flat binary with BSS pre-allocated as zeroes,
-          # so image.size() covers the full virtual footprint (code+data+BSS+stack).
-          elfToBin = elfPath: binPath: ''
-            ${objcopy} --set-section-flags .bss=alloc,contents -O binary ${elfPath} ${binPath}
-          '';
+          mkPneuma =
+            arch:
+            pkgs.stdenv.mkDerivation {
+              pname = "pneuma-${arch}";
+              version = "unstable";
+              src = self;
 
-          # Fetch FatFs source
-          fatfs-src = pkgs.fetchzip {
-            url = "https://elm-chan.org/fsw/ff/arc/ff16.zip";
-            hash = "sha256-FyN+We8M68pxtltRrRgc8L8bpWhsnQMYfRLxIQNE1Bg=";
-            stripRoot = false;
-          };
+              nativeBuildInputs = nativeBuildInputsFor pkgs;
 
-          # Fetch doomgeneric source
-          doomgeneric-src = pkgs.fetchFromGitHub {
-            owner = "ozkl";
-            repo = "doomgeneric";
-            rev = "fc601639494e089702a1ada082eb51aaafc03722";
-            hash = "sha256-JGa7gTvSvxlmCLw9E+RDMt5RRjorNuA0GnC1kU9xnZ0=";
-          };
+              postPatch = ''
+                patchShebangs scripts
+              '';
 
-          # Helper to find files recursively
-          findFiles =
-            dir: suffix:
-            let
-              contents = builtins.readDir dir;
-              processEntry =
-                name: type:
-                let
-                  path = dir + "/${name}";
-                in
-                if type == "directory" then
-                  findFiles path suffix
-                else if lib.hasSuffix suffix name then
-                  [ path ]
-                else
-                  [ ];
-            in
-            builtins.concatLists (lib.mapAttrsToList processEntry contents);
+              cmakeFlags = [
+                "-GNinja"
+                "-DCMAKE_TOOLCHAIN_FILE=${self}/cmake/toolchain-${arch}.cmake"
+                # Nixpkgs' cmake setup hook defaults to Release (-O3 -DNDEBUG)
+                # when CMAKE_BUILD_TYPE is unset.
+                # -O3 constant-folded the all-zero PCB table from .bss into 16 MB of
+                # literal .data instead of leaving it as a zero-fill reservation.
+                "-DCMAKE_BUILD_TYPE="
+              ];
 
-          # Glob all kernel sources and headers
-          kernelSources = findFiles ./kernel ".cc";
-          kernelHeaders = findFiles ./kernel ".h";
+              env = commonEnvFor pkgs;
 
-          # Source file lists for libc and user programs
-          libcCxxSources = findFiles ./libc/src ".cc";
-          libcCSources = findFiles ./libc/src ".c";
-          libcHeaders = findFiles ./libc/include ".h";
-          # Shared user-space driver headers (virtio, IPC protocols). Not part of libc.
-          driverHeaders = findFiles ./driver ".h";
-          userPrograms = builtins.filter (p: !lib.hasSuffix "doomgeneric_rv.c" (toString p)) (
-            (findFiles ./user ".cc") ++ (findFiles ./user ".c") ++ (findFiles ./driver ".cc")
-          );
+              enableParallelBuilding = true;
 
-          # Helper to get just the filename from a path
-          basename = path: builtins.baseNameOf (toString path);
-
-          # Get relative path within kernel directory
-          kernelRelPath =
-            path:
-            let
-              pathStr = toString path;
-              kernelDir = toString ./kernel + "/";
-            in
-            lib.removePrefix kernelDir pathStr;
-
-          # Get relative path within libc/include directory
-          libcIncludeRelPath =
-            path:
-            let
-              pathStr = toString path;
-              libcIncludeDir = toString ./libc/include + "/";
-            in
-            lib.removePrefix libcIncludeDir pathStr;
-
-          # Get relative path within driver/ directory
-          driverRelPath =
-            path:
-            let
-              pathStr = toString path;
-              driverDir = toString ./driver + "/";
-            in
-            lib.removePrefix driverDir pathStr;
-
-          # Get relative path within libc/src directory
-          libcSrcRelPath =
-            path:
-            let
-              pathStr = toString path;
-              libcSrcDir = toString ./libc/src + "/";
-            in
-            lib.removePrefix libcSrcDir pathStr;
-
-          # Compiler flags for each architecture
-          mkFlags =
-            arch: includeDir: driverDir:
-            let
-              cfg = archConfigs.${arch};
-              pie = if arch == "riscv64" then "-fPIE" else "";
-              archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
-              common = "-g3 -Wall -Wextra ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie}";
-            in
-            {
-              # Kernel C++ flags. -ffixed-x4 keeps the compiler off tp, which holds the hartid
-              # kernel-wide (user code may still clobber it; trap entry re-derives it).
-              kernel = "-std=c++2c ${common} -fno-exceptions -ffixed-x4 -I kernel -isystem ${driverDir}";
-              # User C++ flags
-              cxx = "-std=c++2c ${common} -fno-exceptions -nostdlibinc -isystem ${includeDir} -isystem ${driverDir}";
-              # User C flags
-              c = "-std=c2x ${common} -nostdlibinc -isystem ${includeDir} -isystem ${driverDir}";
-              # FatFs C flags (relaxed warnings for third-party code)
-              fatfs = "-std=c2x -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdlibinc -isystem ${includeDir} -isystem ${driverDir} -Wno-unused-parameter";
+              installPhase = ''
+                mkdir -p $out
+                cp *.elf Image disk.img *.map compile_commands.json $out/
+              '';
             };
 
-          # Build libc + FatFs for a specific architecture
-          mkLibc =
-            arch:
-            let
-              flags = mkFlags arch "include" "driver";
-            in
-            pkgs.runCommand "libc-${arch}"
-              {
-                nativeBuildInputs = [ pkgs.llvmPackages_latest.clang-unwrapped ];
-              }
-              ''
-                mkdir -p $out
-
-                # Copy libc headers
-                mkdir -p include
-                ${lib.concatMapStringsSep "\n" (
-                  path:
-                  let
-                    relPath = libcIncludeRelPath path;
-                    dir = builtins.dirOf relPath;
-                  in
-                  ''
-                    mkdir -p include/${dir}
-                    cp ${path} include/${relPath}
-                  ''
-                ) libcHeaders}
-
-                # Copy shared driver headers (virtio + IPC protocols)
-                mkdir -p driver
-                ${lib.concatMapStringsSep "\n" (
-                  path:
-                  let
-                    relPath = driverRelPath path;
-                    dir = builtins.dirOf relPath;
-                  in
-                  ''
-                    mkdir -p driver/${dir}
-                    cp ${path} driver/${relPath}
-                  ''
-                ) driverHeaders}
-
-                # Copy libc sources
-                mkdir -p src
-                ${lib.concatMapStringsSep "\n" (
-                  path:
-                  let
-                    relPath = libcSrcRelPath path;
-                    dir = builtins.dirOf relPath;
-                  in
-                  ''
-                    mkdir -p src/${dir}
-                    cp ${path} src/${relPath}
-                  ''
-                ) (libcCxxSources ++ libcCSources)}
-
-                # Copy FatFs source files from upstream
-                mkdir -p fatfs
-                cp ${fatfs-src}/source/ff.c fatfs/
-                cp ${fatfs-src}/source/ff.h fatfs/
-                cp ${fatfs-src}/source/diskio.h fatfs/
-                cp ${fatfs-src}/source/ffconf.h fatfs/ffconf.h
-                # Patch ffconf.h to switch from Japnese to U.S.
-                sed -i 's|^#define FF_CODE_PAGE.*|#define FF_CODE_PAGE 437|' fatfs/ffconf.h
-                # I don't want to implement get_fattime()
-                sed -i 's|^#define FF_FS_NORTC.*|#define FF_FS_NORTC 1|' fatfs/ffconf.h
-                # Copy our custom diskio implementation
-                cp ${./libc/fatfs/diskio.c} fatfs/diskio.c
-
-                # Compile FatFs
-                ${clang} ${flags.fatfs} -I fatfs -c -o $out/fatfs-ff.o fatfs/ff.c
-                ${clang} ${flags.fatfs} -I fatfs -c -o $out/fatfs-diskio.o fatfs/diskio.c
-
-                # Compile libc C++ sources
-                ${lib.concatMapStringsSep "\n" (
-                  src:
-                  let
-                    relPath = libcSrcRelPath src;
-                    name = lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] relPath);
-                  in
-                  ''
-                    ${clang} ${flags.cxx} -I fatfs -c -o $out/libc-${name}.o src/${relPath}
-                  ''
-                ) libcCxxSources}
-
-                # Compile libc C sources
-                ${lib.concatMapStringsSep "\n" (
-                  src:
-                  let
-                    relPath = libcSrcRelPath src;
-                    name = lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] relPath);
-                  in
-                  ''
-                    ${clang} ${flags.c} -I fatfs -c -o $out/libc-${name}.o src/${relPath}
-                  ''
-                ) libcCSources}
-
-                # Also copy headers and linker script for user programs
-                cp -r include $out/include
-                cp -r driver $out/driver
-                cp ${./user/user.ld} $out/user.ld
-
-                # Export FatFs headers for the file server (user/fs.cc)
-                mkdir -p $out/include/fatfs
-                cp fatfs/ff.h fatfs/diskio.h fatfs/ffconf.h $out/include/fatfs/
-              '';
-
-          # Build Doom for a specific architecture
-          mkDoom =
-            arch:
-            let
-              cfg = archConfigs.${arch};
-              libc = mkLibc arch;
-              flags = mkFlags arch "${libc}/include" "${libc}/driver";
-
-              # Doom-specific flags (relaxed warnings for third-party code)
-              # Use -nostdinc to disable all built-in includes, then add our headers first,
-              # then clang's resource dir for stdint.h/stddef.h/stdarg.h
-              archFlags = "--target=${cfg.target} -march=${cfg.march} -mabi=${cfg.mabi}";
-              pie = if arch == "riscv64" then "-fPIE" else "";
-              doomFlagsBase = "-std=c99 -g3 ${archFlags} -fno-stack-protector -fno-omit-frame-pointer -ffreestanding -nostdlib ${pie} -nostdinc -DNORMALUNIX -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -Wno-implicit-function-declaration -Wno-unused-parameter -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-sign-compare -Wno-pointer-sign";
-
-              # List all libc object files
-              libcCxxObjs = map (
-                p:
-                "${libc}/libc-${
-                  lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
-                }.o"
-              ) libcCxxSources;
-              libcCObjs = map (
-                p:
-                "${libc}/libc-${
-                  lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
-                }.o"
-              ) libcCSources;
-              fatfsObjs = [
-                "${libc}/fatfs-ff.o"
-                "${libc}/fatfs-diskio.o"
-              ];
-              allLibcObjs = libcCxxObjs ++ libcCObjs;
-            in
-            pkgs.runCommand "doom-${arch}"
-              {
-                nativeBuildInputs = with pkgs.llvmPackages_latest; [
-                  clang-unwrapped
-                  bintools-unwrapped
-                ];
-              }
-              ''
-                mkdir -p $out
-
-                # Get clang's resource directory for built-in headers (stdint.h, stddef.h, etc.)
-                CLANG_RESOURCE_DIR=$(${clang} -print-resource-dir)/include
-                echo "Clang resource dir: $CLANG_RESOURCE_DIR"
-
-                # Full doom flags: our headers first (-I), then clang builtins (-isystem, searched after -I)
-                DOOM_FLAGS="${doomFlagsBase} -I${libc}/include -isystem ${libc}/driver -isystem $CLANG_RESOURCE_DIR"
-
-                # Copy doomgeneric sources to working directory
-                mkdir -p doomgeneric
-                cp ${doomgeneric-src}/doomgeneric/*.c doomgeneric/
-                cp ${doomgeneric-src}/doomgeneric/*.h doomgeneric/
-
-                sed -i 's|#include <inttypes.h>|#include <stdint.h>|' doomgeneric/doomtype.h # stdint.h is the file it really wants
-                sed -i 's|#include <unistd.h>||' doomgeneric/i_system.c # isatty is guarded by false #if
-                sed -i 's|#include <assert.h>||' doomgeneric/sha1.c # Not used
-                sed -i 's|#include <sys/types.h>|#include <stdint.h>|' doomgeneric/*.c # stdint.h is the file it really wants
-
-                # Remove platform-specific implementations we don't want
-                rm -f doomgeneric/doomgeneric_*.c
-                rm -f doomgeneric/i_sdlmusic.c
-                rm -f doomgeneric/i_sdlsound.c
-                rm -f doomgeneric/i_allegro*.c   # Allegro bindings
-                rm -f doomgeneric/i_cdmus.c      # CD music
-                rm -f doomgeneric/gusconf.c      # GUS sound card emulation
-                rm -f doomgeneric/mus2mid.c      # Some kind of MIDI thing
-                rm -f doomgeneric/icon.c
-                rm -f doomgeneric/m_fixed.c      # Cause trouble on RV32
-
-                # Copy our platform layer into the same directory
-                cp ${./user/doomgeneric_rv.c} doomgeneric/
-
-                # Compile all doomgeneric sources
-                for src in doomgeneric/*.c; do
-                  name=$(basename "$src" .c)
-                  echo "Compiling: $name.c"
-                  ${clang} $DOOM_FLAGS -Idoomgeneric -c "$src" -o "$name.o"
-                done
-
-                # Link
-                echo "Linking doom.elf"
-                ${clang} $DOOM_FLAGS \
-                  --ld-path=${lld} \
-                  -Wl,-T${libc}/user.ld \
-                  -Wl,-Map=$out/doom.map \
-                  -o $out/doom.elf \
-                  *.o ${lib.concatStringsSep " " allLibcObjs}
-
-                # Convert to binary
-                ${elfToBin "$out/doom.elf" "$out/doom.bin"}
-              '';
-
-          # Build kernel with embedded user programs
-          mkKernel =
-            arch: ldScript:
-            let
-              cfg = archConfigs.${arch};
-              libc = mkLibc arch;
-              flags = mkFlags arch "${libc}/include" "${libc}/driver";
-              doom = mkDoom arch;
-
-              # Link the rv64 kernel as a static-PIE (ET_DYN with R_RISCV_RELATIVE
-              # relocations). Combined with the boot-time relocation loop in main.cc,
-              # one binary boots at any DRAM base (virt @ 0x80200000, jh7110 @ 0x40200000).
-              # rv32 stays a fixed ET_EXEC (it is not compiled -fPIE).
-              # -Wl,-pie (not driver -pie, which clang's bare-metal toolchain ignores)
-              # forces lld to emit an ET_DYN with R_RISCV_RELATIVE relocations.
-              pieLink = lib.optionalString (arch == "riscv64") "-Wl,-pie -Wl,--no-dynamic-linker -Wl,-z,norelro";
-
-              readelf = "${pkgs.llvmPackages_latest.bintools-unwrapped}/bin/llvm-readelf";
-
-              # Guard the static-PIE contract the main.cc boot loop depends on: the
-              # rv64 kernel must be an ET_DYN whose dynamic relocations are ALL
-              # R_RISCV_RELATIVE. Catches two silent regressions a toolchain/linker
-              # swap could introduce -- a dropped -pie (ET_EXEC, zero relocs -> kernel
-              # only works at its link address) or a reloc type the loop can't apply
-              # (e.g. R_RISCV_IRELATIVE). Both otherwise fault only on a shifted DRAM
-              # base (jh7110), never on virt. rv32 is ET_EXEC by design, so skip it.
-              pieGuard = lib.optionalString (arch == "riscv64") ''
-                echo "Verifying rv64 static-PIE relocations..."
-                if ! ${readelf} -h $out/kernel.elf | grep -q "Type:.*DYN"; then
-                  echo "ERROR: kernel.elf is not ET_DYN -- -pie was dropped; self-relocation is a no-op." >&2
-                  exit 1
-                fi
-                relcount=$(${readelf} -r $out/kernel.elf | grep -c "R_RISCV_RELATIVE" || true)
-                if [ "$relcount" -eq 0 ]; then
-                  echo "ERROR: no R_RISCV_RELATIVE relocations -- nothing to self-relocate." >&2
-                  exit 1
-                fi
-                if ${readelf} -r $out/kernel.elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" | grep -q .; then
-                  echo "ERROR: .rela.dyn has non-RELATIVE dynamic relocs the boot loop cannot apply:" >&2
-                  ${readelf} -r $out/kernel.elf | grep "R_RISCV_" | grep -v "R_RISCV_RELATIVE" >&2
-                  exit 1
-                fi
-                echo "OK: ET_DYN with $relcount R_RISCV_RELATIVE relocations, no others."
-              '';
-
-              # List all libc object files
-              libcCxxObjs = map (
-                p:
-                "${libc}/libc-${
-                  lib.removeSuffix ".cc" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
-                }.o"
-              ) libcCxxSources;
-              libcCObjs = map (
-                p:
-                "${libc}/libc-${
-                  lib.removeSuffix ".c" (builtins.replaceStrings [ "/" ] [ "-" ] (libcSrcRelPath p))
-                }.o"
-              ) libcCSources;
-              fatfsObjs = [
-                "${libc}/fatfs-ff.o"
-                "${libc}/fatfs-diskio.o"
-              ];
-              allLibcObjs = libcCxxObjs ++ libcCObjs ++ fatfsObjs;
-
-              # Embed a flat binary into the kernel as _binary_<name>_bin_{start,end,size} symbols.
-              # binPath may be a Nix store path or a bash expression like "$out/foo.bin".
-              embedBin =
-                name: binPath:
-                let
-                  sym = lib.replaceStrings [ "-" ] [ "_" ] name;
-                in
-                ''
-                  cat > $out/${name}.S << ASMEOF
-                  .section .rodata
-                  .global _binary_${sym}_bin_start
-                  .global _binary_${sym}_bin_end
-                  .global _binary_${sym}_bin_size
-                  .balign 8
-                  _binary_${sym}_bin_start:
-                  .incbin "${binPath}"
-                  _binary_${sym}_bin_end:
-                  .set _binary_${sym}_bin_size, _binary_${sym}_bin_end - _binary_${sym}_bin_start
-                  ASMEOF
-                  ${clang} ${flags.kernel} -c $out/${name}.S -o $out/${name}.bin.o
-                '';
-
-              # Compile, link, and embed a user program.
-              # --set-section-flags .bss=alloc,contents is always applied so that image.size()
-              # covers the full virtual footprint (code + data + BSS + stack) and proc::create
-              # can compute heap_start as align_up(USER_BASE + image.size()) without any
-              # out-of-band communication from the binary.
-              buildAndEmbed =
-                progPath:
-                let
-                  progFile = basename progPath;
-                  name = lib.removeSuffix ".c" (lib.removeSuffix ".cc" progFile);
-                  isC = lib.hasSuffix ".c" progFile;
-                  progFlags = if isC then flags.c else flags.cxx;
-                  isFs = name == "fs";
-                  # fs links FatFs directly; all others use IPC through stdio.cc
-                  linkObjs = if isFs then libcCxxObjs ++ libcCObjs ++ fatfsObjs else libcCxxObjs ++ libcCObjs;
-                  extraFlags = if isFs then "-I${libc}/include/fatfs" else "";
-                in
-                ''
-                  ${clang} ${progFlags} ${extraFlags} -c -o user-${name}.o user/${progFile}
-                  ${clang} ${flags.cxx} \
-                    --ld-path=${lld} \
-                    -Wl,-T${libc}/user.ld \
-                    -Wl,-Map=$out/${name}.map \
-                    -o $out/${name}.elf \
-                    ${lib.concatStringsSep " " linkObjs} user-${name}.o
-                  ${elfToBin "$out/${name}.elf" "$out/${name}.bin"}
-                  ${embedBin name "$out/${name}.bin"}
-                '';
-            in
-            pkgs.runCommand "build-kernel-${arch}"
-              {
-                nativeBuildInputs = with pkgs.llvmPackages_latest; [
-                  clang-unwrapped
-                  bintools-unwrapped
-                  pkgs.dosfstools
-                  pkgs.mtools
-                ];
-              }
-              ''
-                mkdir -p $out
-
-                # Copy kernel directory structure
-                cp -r ${./kernel} kernel
-                chmod -R u+w kernel
-
-                # Copy user directory
-                mkdir -p user
-                ${lib.concatMapStringsSep "\n" (path: "cp ${path} user/${basename path}") userPrograms}
-
-                # Build and embed user programs
-                ${lib.concatMapStringsSep "\n" buildAndEmbed userPrograms}
-
-                # Embed doom binary
-                ${embedBin "doom" "${doom}/doom.bin"}
-
-                # Build kernel.elf with embedded user programs
-                ${clang} ${flags.kernel} ${pieLink} \
-                  --ld-path=${lld} \
-                  -Wl,-Tkernel/${ldScript} \
-                  -Wl,-Map=$out/kernel.map \
-                  -o $out/kernel.elf \
-                  ${lib.concatStringsSep " " (map (p: "kernel/${kernelRelPath p}") kernelSources)} \
-                  ${
-                    lib.concatStringsSep " " (
-                      map (
-                        prog: "$out/${lib.removeSuffix ".c" (lib.removeSuffix ".cc" (basename prog))}.bin.o"
-                      ) userPrograms
-                    )
-                  } \
-                  $out/doom.bin.o
-
-                ${pieGuard}
-
-                # Generate Image file for U-Boot booti
-                ${objcopy} -O binary $out/kernel.elf $out/Image
-
-                # Create FAT disk image (32MB FAT16, must be bigger than kernel image to be selected as disk in virtio-blk.cc)
-                dd if=/dev/zero of=$out/disk.img bs=1M count=32
-                mkfs.fat -F 16 $out/disk.img
-                # Copy files from disk/ directory if it exists
-                for f in ${./disk}/*; do
-                  if [ -f "$f" ]; then
-                    mcopy -i $out/disk.img "$f" "::$(basename "$f")"
-                  fi
-                done
-              '';
-
-          # Helper function to generate compile_commands.json for clangd
-          mkCompileCommands =
-            arch:
-            let
-              flags = mkFlags arch "libc/include" "driver";
-
-              # Generate entries for kernel sources
-              kernelEntries = map (src: {
-                directory = ".";
-                command = "${clang} ${flags.kernel} -c kernel/${kernelRelPath src}";
-                file = "kernel/${kernelRelPath src}";
-              }) kernelSources;
-
-              # Generate entries for libc C++ sources
-              libcCxxEntries = map (src: {
-                directory = ".";
-                command = "${clang} ${flags.cxx} -I libc/fatfs -c libc/src/${libcSrcRelPath src}";
-                file = "libc/src/${libcSrcRelPath src}";
-              }) libcCxxSources;
-
-              # Generate entries for libc C sources
-              libcCEntries = map (src: {
-                directory = ".";
-                command = "${clang} ${flags.c} -I libc/fatfs -c libc/src/${libcSrcRelPath src}";
-                file = "libc/src/${libcSrcRelPath src}";
-              }) libcCSources;
-
-              # Generate entries for user programs (live in user/ or driver/)
-              userEntries = map (
-                src:
-                let
-                  file = lib.removePrefix (toString ./. + "/") (toString src);
-                  isC = lib.hasSuffix ".c" file;
-                  progFlags = if isC then flags.c else flags.cxx;
-                in
-                {
-                  directory = ".";
-                  command = "${clang} ${progFlags} -c ${file}";
-                  file = file;
-                }
-              ) userPrograms;
-
-              entries = kernelEntries ++ libcCxxEntries ++ libcCEntries ++ userEntries;
-              jsonContent = builtins.toJSON entries;
-
-            in
-            pkgs.writeTextFile {
-              name = "compile_commands.json";
-              text = jsonContent;
-            };
-
-          # Build both architectures
-          build32 = mkKernel "riscv32" "kernel.ld";
-          build64 = mkKernel "riscv64" "kernel.ld";
-
-          # Build Doom for both architectures
-          doom32 = mkDoom "riscv32";
-          doom64 = mkDoom "riscv64";
+          build32 = mkPneuma "riscv32";
+          build64 = mkPneuma "riscv64";
 
         in
         {
           rv32 = build32;
           rv64 = build64;
           default = build64;
-          compile-commands = mkCompileCommands "riscv64";
-          doom-rv32 = doom32;
-          doom-rv64 = doom64;
+          compile-commands = pkgs.runCommand "compile_commands.json" { } ''
+            cp ${build64}/compile_commands.json $out
+          '';
         }
       );
     };
