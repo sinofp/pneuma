@@ -22,7 +22,7 @@
         lld = pkgs.llvmPackages_latest.lld;
         bintools = pkgs.llvmPackages_latest.bintools-unwrapped; # llvm-nm, llvm-objdump, llvm-objcopy, llvm-ar, etc.
       };
-      
+
       nativeBuildInputsFor =
         pkgs: with pkgs; [
           cmake
@@ -142,6 +142,8 @@
           nativeBuildInputs = nativeBuildInputsFor pkgs;
 
           commonEnv = commonEnvFor pkgs;
+
+          toolchain = toolchainFor pkgs;
         in
         {
           default = pkgs.mkShell {
@@ -165,7 +167,7 @@
               )}
               export QEMU_OPENSBI="${opensbi}/share/opensbi"
               export UBOOT_QEMU="${ubootQemu}/u-boot.bin"
-              export PATH="${ubootQemu}:$PWD/scripts:$PWD:$PATH" # mkimage (from U-Boot), run, fmt
+              export PATH="${toolchain.clang}/bin:${ubootQemu}:$PWD/scripts:$PATH" # clang-format/clangd, mkimage (from U-Boot), run, fmt
               export DOOM_WAD="${doom1WadFor pkgs}"
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"

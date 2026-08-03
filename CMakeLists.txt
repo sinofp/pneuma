@@ -101,7 +101,7 @@ function(embed_elf name)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# FatFs (fs server only). Patch ffconf.h at configure time — no sed step.
+# FatFs with undefined diskio functions (for fs.cc).
 # ---------------------------------------------------------------------------
 set(FATFS_BD ${CMAKE_BINARY_DIR}/fatfs)
 # Stage ff.c/ff.h/diskio.h next to a patched ffconf.h: ff.c's `#include "ff.h"`
@@ -118,12 +118,11 @@ string(REGEX REPLACE "#define FF_FS_NORTC[ \t]+[0-9]+"  "#define FF_FS_NORTC 1" 
 # ffconf.h itself (and everything downstream of it) is only touched when the patched content actually changes.
 file(WRITE "${FATFS_BD}/ffconf.h.in" "${_ffconf}")
 configure_file("${FATFS_BD}/ffconf.h.in" ${FATFS_BD}/ffconf.h COPYONLY)
-
-add_library(fatfs OBJECT
-  ${FATFS_BD}/ff.c
-  ${CMAKE_SOURCE_DIR}/libc/fatfs/diskio.c)
+# diskio.c became part of the fs.cc.
+# ffsystem.c and ffunicode.c is not needed when FF_USE_LFN and FF_FS_REENTRANT are 0s
+add_library(fatfs OBJECT ${FATFS_BD}/ff.c)
 target_compile_options(fatfs PRIVATE ${FATFS_C})
-target_include_directories(fatfs SYSTEM PRIVATE ${FATFS_BD} ${LIBC_INC} ${DRV_INC})
+target_include_directories(fatfs SYSTEM PRIVATE ${FATFS_BD} ${LIBC_INC})
 
 # ---------------------------------------------------------------------------
 # libc as an object library linked whole into every user program.
@@ -163,7 +162,6 @@ foreach(src ${PROGRAMS})
   target_link_libraries(${name} PRIVATE libc)
 
   # fs links FatFs directly instead of talking to itself over IPC.
-  # TODO patch FatFs and replace the fs proc. Move diskio.c out of libc/fatfs
   if(name STREQUAL "fs")
     target_link_libraries(${name} PRIVATE fatfs)
     target_include_directories(${name} SYSTEM PRIVATE ${FATFS_BD})

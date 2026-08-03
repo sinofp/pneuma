@@ -1,9 +1,139 @@
+// clang-format off
 #include "ff.h"
+#include "diskio.h"
+// clang-format on
+#include <ipc/blk.h>
 #include <ipc/fs.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ipc.h>
 #include <sys/misc.h>
+
+static_assert(FF_USE_LFN == 0, "LFN needs ffunicode.c");
+static_assert(FF_FS_REENTRANT == 0, "reentrancy needs ffsystem.c");
+
+/////////////////
+// diskio.c
+/////////////////
+
+DSTATUS disk_status(BYTE pdrv) {
+    if (0 != pdrv)
+        return STA_NOINIT;
+    return 0;
+}
+
+DSTATUS disk_initialize(BYTE pdrv) {
+    if (0 != pdrv)
+        return STA_NOINIT;
+    // The user-space virtio-blk driver is brought up before f_mount is invoked.
+    return 0;
+}
+
+DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
+    if (0 != pdrv)
+        return RES_PARERR;
+
+    blk_req_t req = {};
+    blk_resp_t resp;
+    req.op = BLK_OP_READ;
+    // Variable-size IPC: send only the header (20 B); receive header + count * 512.
+    // Kernel cross_proc_memcpy uses min(sender_size, receiver_size).
+    const size_t req_hdr = offsetof(blk_req_t, data);
+    const size_t resp_hdr = offsetof(blk_resp_t, data);
+    while (count > 0) {
+        UINT batch = count < BLK_MAX_SECTORS ? count : BLK_MAX_SECTORS;
+        req.sector = sector;
+        req.count = batch;
+        if (ssend(&req, req_hdr, BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (recv(&resp, resp_hdr + batch * BLK_SECTOR_BYTES, BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (0 != resp.result)
+            return RES_ERROR;
+        memcpy(buff, resp.data, batch * BLK_SECTOR_BYTES);
+        buff += batch * BLK_SECTOR_BYTES;
+        sector += batch;
+        count -= batch;
+    }
+
+    return RES_OK;
+}
+
+#if FF_FS_READONLY == 0
+
+DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
+    if (0 != pdrv)
+        return RES_PARERR;
+
+    blk_req_t req = {};
+    blk_resp_t resp;
+    req.op = BLK_OP_WRITE;
+    // Send header + count * 512 of data; reply is just sizeof(int).
+    const size_t req_hdr = offsetof(blk_req_t, data);
+    while (count > 0) {
+        UINT batch = count < BLK_MAX_SECTORS ? count : BLK_MAX_SECTORS;
+        req.sector = sector;
+        req.count = batch;
+        memcpy(req.data, buff, batch * BLK_SECTOR_BYTES);
+        if (ssend(&req, req_hdr + batch * BLK_SECTOR_BYTES, BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (recv(&resp, sizeof(int), BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (0 != resp.result)
+            return RES_ERROR;
+        buff += batch * BLK_SECTOR_BYTES;
+        sector += batch;
+        count -= batch;
+    }
+
+    return RES_OK;
+}
+
+#endif
+
+DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
+    if (0 != pdrv)
+        return RES_PARERR;
+
+    blk_req_t req = {};
+    blk_resp_t resp;
+
+    switch (cmd) {
+    case CTRL_SYNC:
+        req.op = BLK_OP_FLUSH;
+        if (ssend(&req, offsetof(blk_req_t, data), BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (recv(&resp, sizeof(int), BLK_SERVER) < 0)
+            return RES_ERROR;
+        return (0 == resp.result) ? RES_OK : RES_ERROR;
+
+    case GET_SECTOR_COUNT:
+        req.op = BLK_OP_IOCTL_SECTOR_COUNT;
+        // IOCTL: send header only, reply is just sizeof(int).
+        if (ssend(&req, offsetof(blk_req_t, data), BLK_SERVER) < 0)
+            return RES_ERROR;
+        if (recv(&resp, sizeof(int), BLK_SERVER) < 0)
+            return RES_ERROR;
+        *reinterpret_cast<LBA_t *>(buff) = static_cast<LBA_t>(resp.result);
+        return RES_OK;
+
+    case GET_SECTOR_SIZE:
+        *reinterpret_cast<WORD *>(buff) = BLK_SECTOR_BYTES;
+        return RES_OK;
+
+    case GET_BLOCK_SIZE:
+        *reinterpret_cast<DWORD *>(buff) = 1;
+        return RES_OK;
+
+    default:
+        return RES_PARERR;
+    }
+}
+
+/////////////////////////
+// Interface for fs_req_t
+/////////////////////////
 
 static FATFS g_fatfs;
 static constexpr int MAX_FILES = 16;
@@ -73,7 +203,7 @@ static fs_req_t req;
 
 extern "C" void main() {
     FRESULT res = f_mount(&g_fatfs, "", 1);
-    printf("fs: f_mount result %d\n", (int) res);
+    printf("fs: f_mount result %d\n", static_cast<int>(res));
 
     for (;;) {
         int_pid client = recv(&req, sizeof req, ANY_SOURCE);
@@ -121,7 +251,7 @@ extern "C" void main() {
             if (fil) {
                 UINT bw = 0;
                 unsigned to_write = req.write.size < FS_MAX_DATA ? req.write.size : FS_MAX_DATA;
-                result = (FR_OK == f_write(fil, req.write.data, to_write, &bw)) ? (int) bw : -1;
+                result = (FR_OK == f_write(fil, req.write.data, to_write, &bw)) ? static_cast<int>(bw) : -1;
             }
             ssend(&result, sizeof result, client);
             break;
@@ -148,7 +278,7 @@ extern "C" void main() {
         }
         case FS_OP_TELL: {
             FIL *fil = get_fil(req.fd.fd);
-            fs_resp_ok_t result = fil ? (int) f_tell(fil) : -1;
+            fs_resp_ok_t result = fil ? static_cast<int>(f_tell(fil)) : -1;
             ssend(&result, sizeof result, client);
             break;
         }
