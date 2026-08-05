@@ -81,5 +81,7 @@ void reschedule();
 // it long before this resumes; touching shared state after requires re-acquiring (see sys_irq_wait)
 void reschedule(lock::guard &g);
 
-inline bool bad_id(id_t id) { return id < 0 or MAX <= id or state_t::UNUSED == proc::procs[id].state; }
+inline bool bad_id(id_t id) {
+    return id < 0 or MAX <= id or state_t::UNUSED == proc::procs[id].state or state_t::EXITED == proc::procs[id].state;
+}
 } // namespace proc

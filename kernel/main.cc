@@ -85,7 +85,7 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
 
     // Create user servers and apps relying on fixed pid.
     //   PID 1 = fs
-    //   PID 2 = virtio-blk
+    //   PID 2 = blk
     //   PID 3 = virtio-input
     //   PID 4 = virtio-gpu
     //   PID 5 = libc-test (for smoke.exp)
@@ -95,10 +95,9 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     proc::chprio(fs, proc::prio_t::V);
     printf("Process created: fs (%d)\n", fs->pid);
 
-    auto *virtio_blk =
-        proc::create({ _binary_virtio_blk_bin_start, reinterpret_cast<size_t>(_binary_virtio_blk_bin_size) });
-    proc::chprio(virtio_blk, proc::prio_t::V);
-    printf("Process created: virtio-blk (%d)\n", virtio_blk->pid);
+    auto *blk = proc::create({ _binary_blk_bin_start, reinterpret_cast<size_t>(_binary_blk_bin_size) });
+    proc::chprio(blk, proc::prio_t::V);
+    printf("Process created: blk (%d)\n", blk->pid);
 
     auto *virtio_input =
         proc::create({ _binary_virtio_input_bin_start, reinterpret_cast<size_t>(_binary_virtio_input_bin_size) });
@@ -145,7 +144,7 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     }
     __atomic_store_n(&smp_ready, 1, __ATOMIC_RELEASE);
 
-    proc::resume(virtio_blk);
+    proc::resume(blk);
     proc::resume(virtio_input);
     proc::resume(fs);
     proc::resume(libc_test);

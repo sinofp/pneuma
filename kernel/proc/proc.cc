@@ -370,7 +370,7 @@ id_t message_passing(span<uint8_t> buffer, id_t rank, bool send) {
     csr::intr_guard ig;
     lock::guard g{ lock::bkl };
 
-    if ((-1 != rank and !send) and bad_id(rank))
+    if ((-1 != rank or send) and bad_id(rank))
         return -1;
     using enum state_t;
 

@@ -38,8 +38,16 @@ set(COMMON     -g3 -Wall -Wextra
                -nostdlib -nostdlibinc
                -ffunction-sections -fdata-sections)
 
-set(KERNEL_CXX -std=c++2c ${COMMON} -fno-exceptions -ffixed-x4)
-set(USER_CXX   -std=c++2c ${COMMON} -fno-exceptions)
+set(FREESTANDING_CXX -fno-exceptions -fno-rtti -fno-threadsafe-statics)
+# Diagnostics for gaps the compiler cannot infer from the flags above.
+#   -Wglobal-constructors   crt0.cc jumps straight to main, and neither user.ld nor
+#                           kernel.ld has a .init_array section.
+#   -Wexit-time-destructors the same gap on the way out (__cxa_atexit).
+# ./scripts/warnings sweeps every TU for these without a rebuild
+set(STRICT_CXX -Wglobal-constructors -Wexit-time-destructors)
+
+set(KERNEL_CXX -std=c++2c ${COMMON} ${FREESTANDING_CXX} ${STRICT_CXX} -ffixed-x4)
+set(USER_CXX   -std=c++2c ${COMMON} ${FREESTANDING_CXX} ${STRICT_CXX})
 set(USER_C     -std=c2x   ${COMMON})
 set(FATFS_C    -std=c2x   ${COMMON} -Wno-unused-parameter)
 
@@ -63,20 +71,30 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Embed helpers: turn a flat binary into a linkable .bin.o carrying
-# _binary_<sym>_bin_{start,end,size}, and remember it for the kernel link.
+# _binary_<sym>_bin_{start,size}.
 # ---------------------------------------------------------------------------
 set_property(GLOBAL PROPERTY PNEUMA_EMBEDS "")
 
-function(_embed_asm sym asmout depend)
-  # Assemble a generated .incbin stub into ${sym}.bin.o.
-  set(obj ${CMAKE_BINARY_DIR}/embed/${sym}.bin.o)
+# embed_binary(<sym> <flat-binary> <section> <out-var>)
+#
+# File names follow the input's stem while the symbol follows <sym>; the two
+# differ for hyphenated programs, since '-' is not valid in an identifier
+function(embed_binary sym input section out_var)
+  get_filename_component(stem ${input} NAME_WE)
+  set(asm ${CMAKE_BINARY_DIR}/embed/${stem}.S)
+  set(obj ${CMAKE_BINARY_DIR}/embed/${stem}.bin.o)
+  add_custom_command(
+    OUTPUT ${asm}
+    COMMAND ${SCRIPTS}/gen-incbin ${sym} ${input} ${section} > ${asm}
+    DEPENDS ${input} ${SCRIPTS}/gen-incbin
+    VERBATIM COMMENT "gen ${stem}.S")
   add_custom_command(
     OUTPUT ${obj}
-    COMMAND ${CLANG} ${ARCHFLAGS} -c ${asmout} -o ${obj}
-    DEPENDS ${asmout} ${depend}
-    VERBATIM COMMENT "embed ${sym}")
+    COMMAND ${CLANG} ${ARCHFLAGS} -c ${asm} -o ${obj}
+    DEPENDS ${asm} ${input}
+    VERBATIM COMMENT "embed ${stem}")
   set_source_files_properties(${obj} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
-  set_property(GLOBAL APPEND PROPERTY PNEUMA_EMBEDS ${obj})
+  set(${out_var} ${obj} PARENT_SCOPE)
 endfunction()
 
 # Embed the output of a built user ELF (objcopy elf -> bin -> .bin.o).
@@ -84,7 +102,6 @@ endfunction()
 function(embed_elf name)
   string(REPLACE "-" "_" sym ${name})
   set(bin ${CMAKE_BINARY_DIR}/embed/${name}.bin)
-  set(asm ${CMAKE_BINARY_DIR}/embed/${name}.S)
   # --set-section-flags .bss=alloc,contents so image.size() covers code+data+BSS
   # and proc::create can derive heap_start without out-of-band metadata.
   add_custom_command(
@@ -92,13 +109,30 @@ function(embed_elf name)
     COMMAND ${OBJCOPY} --set-section-flags .bss=alloc,contents -O binary $<TARGET_FILE:${name}> ${bin}
     DEPENDS ${name}
     VERBATIM COMMENT "objcopy ${name}.elf -> ${name}.bin")
-  add_custom_command(
-    OUTPUT ${asm}
-    COMMAND ${SCRIPTS}/gen-incbin ${sym} ${bin} > ${asm}
-    DEPENDS ${bin} ${SCRIPTS}/gen-incbin
-    VERBATIM COMMENT "gen ${name}.S")
-  _embed_asm(${sym} ${asm} ${bin})
+  embed_binary(${sym} ${bin} .rodata obj) # .rodata: the kernel only reads these
+  set_property(GLOBAL APPEND PROPERTY PNEUMA_EMBEDS ${obj})
 endfunction()
+
+# ---------------------------------------------------------------------------
+# RAM disk: a small FAT image linked into blk proc as a fallback disk.
+# ---------------------------------------------------------------------------
+set(PNEUMA_RAM_DISK_KB 64 CACHE STRING "Size of the FAT image baked into blk, in KB")
+
+file(GLOB DISK_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/disk/*)
+
+set(RAM_DISK_IMG ${CMAKE_BINARY_DIR}/ram-disk.img)
+
+# -s 1 (512-byte clusters) is what makes an image this small possible; mkfs.fat
+# refuses anything under 56 KB. It lands as FAT12, which FatFs supports.
+add_custom_command(
+  OUTPUT ${RAM_DISK_IMG}
+  COMMAND ${SCRIPTS}/mkdisk ${RAM_DISK_IMG} ${CMAKE_SOURCE_DIR}/disk ${PNEUMA_RAM_DISK_KB} -s 1
+  DEPENDS ${DISK_FILES} ${SCRIPTS}/mkdisk
+  VERBATIM COMMENT "mkfs ram-disk.img (${PNEUMA_RAM_DISK_KB} KB)")
+
+# .data, not embed_elf()'s .rodata: proc::create maps every image page U|R|W|X
+# today, but Goal 5's ELF loader plans per-segment W^X and this blob is written to.
+embed_binary(ram_disk ${RAM_DISK_IMG} .data RAM_DISK_OBJ)
 
 # ---------------------------------------------------------------------------
 # FatFs with undefined diskio functions (for fs.cc).
@@ -165,6 +199,13 @@ foreach(src ${PROGRAMS})
   if(name STREQUAL "fs")
     target_link_libraries(${name} PRIVATE fatfs)
     target_include_directories(${name} SYSTEM PRIVATE ${FATFS_BD})
+  endif()
+
+  # blk carries the RAM disk image it falls back to. Two nested symbol
+  # pairs result: _binary_ram_disk_bin_* is the FAT image, and embed_elf below
+  # wraps this whole program as _binary_blk_bin_*.
+  if(name STREQUAL "blk")
+    target_sources(${name} PRIVATE ${RAM_DISK_OBJ})
   endif()
 
   target_link_options(${name} PRIVATE
@@ -258,7 +299,8 @@ add_custom_target(image ALL DEPENDS ${CMAKE_BINARY_DIR}/Image)
 # ---------------------------------------------------------------------------
 # DOOM1.WAD is fetched hermetically in flake.nix (as $DOOM_WAD) and injected by
 # scripts/run at boot time, not staged into disk/ here.
-file(GLOB DISK_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/disk/*)
+# DISK_FILES is already globbed next to the RAM disk rules above, which need it
+# before the user-program foreach().
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/disk.img
   COMMAND ${SCRIPTS}/mkdisk ${CMAKE_BINARY_DIR}/disk.img ${CMAKE_SOURCE_DIR}/disk

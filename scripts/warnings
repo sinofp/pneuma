@@ -1,0 +1,81 @@
+#!/usr/bin/env zsh
+# Sweep every translation unit for compiler warnings, without a full rebuild.
+#
+#   warnings [rv32|rv64] [--summary]
+
+set -ue
+
+local arch=rv64 summary=false
+while (( $# )); do
+    case $1 in
+        (rv32|rv64) arch=$1 ;;
+        (--summary) summary=true ;;
+        (*) print -u2 "Usage: $0 [rv32|rv64] [--summary]"; exit 2 ;;
+    esac
+    shift
+done
+
+local repo_root=${0:A:h:h}
+local build_dir=$repo_root/build/$arch
+if [[ ! -f $build_dir/build.ninja ]] {
+    print -u2 "No build tree at $build_dir -- run ./scripts/run $arch first."
+    exit 2
+}
+
+# Rewrite a compile line into a syntax-only check: drop the object output and the
+# depfile bookkeeping (-fsyntax-only still honours -MD and would rewrite .d files
+# out from under ninja), keep everything that affects diagnostics.
+local -a out
+local -i skip=0
+strip_args() {
+    out=()
+    skip=0
+    local a
+    for a in $@; {
+        if (( skip )) { skip=0; continue }
+        case $a in
+            (-o|-MT|-MF) skip=1 ;;
+            (-c|-MD)     ;;
+            (*)          out+=$a ;;
+        esac
+    }
+}
+
+local -a lines
+lines=("${(@f)$(ninja -C $build_dir -t commands)}")
+
+local -i tus=0
+local line stderr
+local -a all
+for line in $lines; {
+    # Compile edges only: a clang invocation ending in a C/C++ source.
+    [[ $line == *' -c '*.(c|cc) ]] || continue
+    strip_args ${(z)line}
+    # Pre-increment deliberately: (( x++ )) yields the *old* value, so the first
+    # one evaluates to 0 -- status 1 -- and set -e would abort the sweep silently.
+    (( ++tus ))
+    stderr=$(${out[1]} ${out[2,-1]} -fsyntax-only 2>&1 >/dev/null) || true
+    [[ -n $stderr ]] && all+=("${(@f)stderr}")
+}
+
+local -a warns
+warns=(${(M)all:#*warning:*})
+
+if [[ $summary == false && ${#warns} -gt 0 ]] {
+    print -l $all
+    print ""
+}
+
+print "$tus TUs, ${#warns} warnings"
+if (( ${#warns} )) {
+    # Tally by category: the trailing [-Wfoo] clang appends to each warning line.
+    local w cat
+    local -A tally
+    for w in $warns; {
+        cat=${${w##*\[}%\]}
+        [[ $cat == -W* ]] || cat='(uncategorised)'
+        (( ++tally[$cat] ))
+    }
+    for cat in ${(k)tally}; { printf '%5d  %s\n' $tally[$cat] $cat }  | sort -rn
+    exit 1
+}

@@ -11,7 +11,7 @@ extern uint8_t __kernel_base[], __free_ram[];
 
 // Embedded user program binaries (from *.bin.o files)
 extern uint8_t _binary_fs_bin_start[], _binary_fs_bin_size[];
-extern uint8_t _binary_virtio_blk_bin_start[], _binary_virtio_blk_bin_size[];
+extern uint8_t _binary_blk_bin_start[], _binary_blk_bin_size[];
 extern uint8_t _binary_virtio_input_bin_start[], _binary_virtio_input_bin_size[];
 extern uint8_t _binary_virtio_gpu_bin_start[], _binary_virtio_gpu_bin_size[];
 extern uint8_t _binary_shell_bin_start[], _binary_shell_bin_size[];

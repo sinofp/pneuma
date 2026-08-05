@@ -81,6 +81,19 @@ send "hello.txt\r"
 must "Hello from FAT filesystem!"
 must "> "
 
+send "write\r"
+must "filename> "
+send "hello.txt\r"
+must "data> "
+send "aklsjdflkasjflkas\r"
+must "wrote 17 bytes to hello.txt"
+
+send "cat\r"
+must "filename> "
+send "hello.txt\r"
+must "aklsjdflkasjflkas"
+must "> "
+
 # C-a x quits QEMU's -nographic mux
 send "\x01x"
 expect eof

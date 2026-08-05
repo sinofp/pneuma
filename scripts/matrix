@@ -6,22 +6,34 @@ set -u
 
 local repo_root=${0:A:h:h}
 
-local -a bases=(rv32 rv64 "rv64 --uboot")
-local -a configs=(vf2)
-local base gpu smp
-for base in $bases; {
-    for gpu in "" "--gpu"; {
-        for smp in "" "--smp 5"; {
-            configs+=("${base}${gpu:+ $gpu}${smp:+ $smp}")
+local -a configs=()
+
+local -a extras=("" --gpu --no-virtio)
+
+local base smp extra
+for base (rv32 rv64 "rv64 --uboot") {
+    for smp ("" "--smp 5") {
+        for extra ("${extras[@]}") {
+            if [[ $base == *--uboot* && $extra == --no-virtio ]] { continue }
+            configs+=("${base}${smp:+ $smp}${extra:+ $extra}")
         }
     }
 }
 
+for extra ("${extras[@]}") {
+    configs+=("vf2${extra:+ $extra}")
+}
+
+configs=(${(uo)configs})
+
+mkdir -p $repo_root/logs
+
 local -a passed failed
 local cfg
-for cfg in $configs; {
+for cfg ($configs) {
     print -n "matrix: ${(r:30:)cfg}"
-    if { $repo_root/scripts/smoke.exp ${(z)cfg} >/dev/null 2>&1 } {
+    $repo_root/scripts/smoke.exp ${(z)cfg} 2>&1 | tr -d '\r' >$repo_root/logs/$cfg.log
+    if (( 0 == pipestatus[1] )) {
         print "PASS"
         passed+=$cfg
     } else {

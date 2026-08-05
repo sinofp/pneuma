@@ -1,17 +1,24 @@
 #!/usr/bin/env zsh
-# Build the 32MB FAT16 data disk seeded from a directory.
+# Build a FAT image seeded from a directory.
 #
-#   mkdisk.sh <out.img> <seed-dir>
-#
-# 32MB is deliberate: virtio-blk.cc picks the *largest* virtio-blk device as the
-# data disk, so this image must stay bigger than the kernel image (and the
-# U-Boot boot disk) to be selected.
+#   mkdisk.sh <out.img> <seed-dir> [size-kb] [mkfs-args...]
+
 set -ue
 local out=$1
 local seed=$2
+local size=${3:-32768}   # KB
+shift $(( $# < 3 ? $# : 3 ))
+# Spelt out rather than ${@:--F 16}: zsh does not word-split the default, so that
+# form hands mkfs.fat a single "-F 16" argument and it prints its usage instead.
+local -a mkfs_args
+if (( $# )) {
+    mkfs_args=($@)
+} else {
+    mkfs_args=(-F 16)
+}
 
-dd if=/dev/zero of=$out bs=1M count=32 status=none
-mkfs.fat -F 16 $out >/dev/null
+dd if=/dev/zero of=$out bs=1K count=$size status=none
+mkfs.fat $mkfs_args $out >/dev/null
 local f
 for f in $seed/*(.); {
     mcopy -i $out $f "::${f:t}"

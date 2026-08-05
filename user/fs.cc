@@ -26,7 +26,7 @@ DSTATUS disk_status(BYTE pdrv) {
 DSTATUS disk_initialize(BYTE pdrv) {
     if (0 != pdrv)
         return STA_NOINIT;
-    // The user-space virtio-blk driver is brought up before f_mount is invoked.
+    // The user-space blk driver is brought up before f_mount is invoked.
     return 0;
 }
 
