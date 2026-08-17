@@ -10,9 +10,14 @@ typedef struct {
     int op;
 } input_req_t;
 
+// deliberately reuse virtio_input_event
+typedef struct __attribute__((packed)) {
+    uint16_t type;
+    uint16_t code;
+    uint32_t value;
+} virtio_input_event;
+
 typedef struct {
-    int has_event; // 1 = valid, 0 = no event this poll
-    uint16_t type; // linux/virtio event type; EV_KEY = 1
-    uint16_t code; // scancode
-    int32_t value; // 1 = press, 0 = release
+    int has_event; // 1 = valid, 0 = no event this poll. Added because our recv can't express it by ret value
+    virtio_input_event ev;
 } input_resp_t;

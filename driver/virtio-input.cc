@@ -22,11 +22,7 @@ using namespace virtio;
 constexpr uint32_t INPUT_DEVICE_ID = 18;
 constexpr le16 EV_SYN = 0;
 
-struct [[gnu::packed]] event {
-    le16 type;
-    le16 code;
-    le32 value;
-};
+using event = virtio_input_event;
 
 // --- driver state ---
 unsigned long mmio_base;
@@ -148,9 +144,7 @@ extern "C" void main() {
         event ev;
         if (ring_pop(ev)) {
             resp.has_event = 1;
-            resp.type = ev.type;
-            resp.code = ev.code;
-            resp.value = static_cast<int32_t>(ev.value);
+            resp.ev = ev;
         }
         ssend(&resp, sizeof resp, client);
     }

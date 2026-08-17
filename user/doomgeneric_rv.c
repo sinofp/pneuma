@@ -1,15 +1,14 @@
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include "m_fixed.h"
-#include <ipc/gpu.h>
-#include <ipc/input.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ipc.h>
 #include <sys/misc.h>
 #include <sys/syscall.h>
-#include <syscalls.h>
+#include <ui/fb.h>
+#include <ui/keys.h>
 
 // Use double to fake Doom 16.16 fixed-point to replace 64-bit int divison on RV32
 fixed_t FixedMul(fixed_t a, fixed_t b) { return (fixed_t) ((double) a * b / FRACUNIT); }
@@ -22,33 +21,14 @@ fixed_t FixedDiv(fixed_t a, fixed_t b) {
 
 void DG_Init(void) {
     // DG_ScreenBuffer is defined and allocated in doomgeneric.c
-    const unsigned long fb_vaddr = (unsigned long) DG_ScreenBuffer;
-    const size_t fb_len = DOOMGENERIC_RESX * DOOMGENERIC_RESY * sizeof(uint32_t);
-
-    gpu_req_t req = { 0 };
-    req.op = GPU_OP_ATTACH;
-    req.width = DOOMGENERIC_RESX;
-    req.height = DOOMGENERIC_RESY;
-    req.head_off = fb_vaddr & 0xFFF; // PAGE_SIZE - 1
-    req.nr_pages = page_walk(fb_vaddr, fb_len, req.paddrs);
-
-    const size_t send_bytes = offsetof(gpu_req_t, paddrs) + req.nr_pages * sizeof(uint64_t);
-    ssend(&req, send_bytes, GPU_SERVER);
-    gpu_resp_t resp;
-    recv(&resp, sizeof resp, GPU_SERVER);
+    fb_open(DG_ScreenBuffer, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
 }
 
-void DG_DrawFrame(void) {
-    gpu_req_t req = { 0 };
-    req.op = GPU_OP_FLUSH;
-    ssend(&req, offsetof(gpu_req_t, paddrs), GPU_SERVER);
-    gpu_resp_t resp;
-    recv(&resp, sizeof resp, GPU_SERVER);
-}
+void DG_DrawFrame(void) { fb_update(); }
 
 void DG_SleepMs(uint32_t ms) { sleep_ms(ms); }
 
-uint32_t DG_GetTicksMs(void) { return syscall(SYS_GET_TICKS, 0, 0, 0); }
+uint32_t DG_GetTicksMs(void) { return get_ticks_ms(); }
 
 // Linux/virtio key code ranges mapped to ASCII
 static const unsigned char keyboard_nums[10] = { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0' };
@@ -56,61 +36,61 @@ static const unsigned char keyboard_qwerty[12] = { 'q', 'w', 'e', 'r', 't', 'y',
 static const unsigned char keyboard_asdf[11] = { 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'' };
 static const unsigned char keyboard_zxcv[11] = { '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/' };
 
-static unsigned char toDoomKey(unsigned int code) {
+static unsigned char toDoomKey(uint_fast16_t code) {
     // Arrow keys
-    if (code == 103)
+    if (code == SCANCODE_UP)
         return KEY_UPARROW;
-    if (code == 108)
+    if (code == SCANCODE_DOWN)
         return KEY_DOWNARROW;
-    if (code == 105)
+    if (code == SCANCODE_LEFT)
         return KEY_LEFTARROW;
-    if (code == 106)
+    if (code == SCANCODE_RIGHT)
         return KEY_RIGHTARROW;
 
     // F Keys
-    if ((59 <= code && code <= 68 /* F1-F10 */) || code == 87 /* F11 */ || code == 88 /* F12 */)
+    if ((SCANCODE_F1 <= code && code <= SCANCODE_F10) || code == SCANCODE_F11 || code == SCANCODE_F12)
         return 0x80 + code;
 
     // Number row
-    if (2 <= code && code <= 11)
-        return keyboard_nums[code - 2];
+    if (SCANCODE_1 <= code && code <= SCANCODE_0)
+        return keyboard_nums[code - SCANCODE_1];
 
     // QWERTY row
-    if (16 <= code && code <= 27)
-        return keyboard_qwerty[code - 16];
+    if (SCANCODE_Q <= code && code <= SCANCODE_RIGHTBRACE)
+        return keyboard_qwerty[code - SCANCODE_Q];
 
     // ASDF row
-    if (30 <= code && code <= 40)
-        return keyboard_asdf[code - 30];
+    if (SCANCODE_A <= code && code <= SCANCODE_APOSTROPHE)
+        return keyboard_asdf[code - SCANCODE_A];
 
     // ZXCV row
-    if (43 <= code && code <= 53)
-        return keyboard_zxcv[code - 43];
+    if (SCANCODE_BACKSLASH <= code && code <= SCANCODE_SLASH)
+        return keyboard_zxcv[code - SCANCODE_BACKSLASH];
 
     // Misc keys
     switch (code) {
-    case 1:
+    case SCANCODE_ESC:
         return KEY_ESCAPE;
-    case 14:
+    case SCANCODE_BACKSPACE:
         return KEY_BACKSPACE;
-    case 15:
+    case SCANCODE_TAB:
         return KEY_TAB;
-    case 28:
+    case SCANCODE_ENTER:
         return KEY_ENTER;
-    case 57:
+    case SCANCODE_SPACE:
         return KEY_USE;
-    case 12:
+    case SCANCODE_MINUS:
         return KEY_MINUS;
-    case 13:
+    case SCANCODE_EQUAL:
         return KEY_EQUALS;
-    case 29:
-    case 97:
+    case SCANCODE_LEFTCTRL:
+    case SCANCODE_RIGHTCTRL:
         return KEY_FIRE; // left/right ctrl
-    case 42:
-    case 54:
+    case SCANCODE_LEFTSHIFT:
+    case SCANCODE_RIGHTSHIFT:
         return KEY_RSHIFT; // left/right shift
-    case 56:
-    case 100:
+    case SCANCODE_LEFTALT:
+    case SCANCODE_RIGHTALT:
         return KEY_LALT; // left/right alt
     default:
         return 0;
@@ -118,21 +98,17 @@ static unsigned char toDoomKey(unsigned int code) {
 }
 
 int DG_GetKey(int *pressed, unsigned char *doomKey) {
-    input_req_t req = { .op = INPUT_OP_GET };
-    ssend(&req, sizeof req, INPUT_SERVER);
-    input_resp_t resp;
-    recv(&resp, sizeof resp, INPUT_SERVER);
-    if (!resp.has_event)
-        return 0;
-    // TODO translate mouse left/right to arrow keys
-    if (resp.type != 1) // not EV_KEY; consume without reporting
-        return 0;
-    *pressed = resp.value;
-    *doomKey = toDoomKey(resp.code);
-    return 1;
+    virtio_input_event ev;
+    if (poll_event(&ev)) {
+        *pressed = ev.value;
+        *doomKey = toDoomKey(ev.code);
+        return 1;
+    }
+
+    return 0;
 }
 
-void DG_SetWindowTitle(const char *title) { printf("DG_SetWindowTitle: %f", title); }
+void DG_SetWindowTitle(const char *title) { printf("DG_SetWindowTitle: %s", title); }
 
 int main() {
     doomgeneric_Create(0, NULL);

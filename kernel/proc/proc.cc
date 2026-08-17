@@ -351,13 +351,19 @@ void timer_tick(int64_t elapsed_ms, bool preempt_due) {
     // Only the primary hart ticks the sleep queue
     if (hart::primary == hart::id()) {
         auto sleepq = proc::sleep_queue();
-        if (!sleepq.empty()) {
-            sleepq.first_key() -= elapsed_ms;
-            while (!sleepq.empty() and sleepq.first_key() <= 0) {
+        // A tick can wake more than one procs.
+        // There's also a chance that elapsed_ms being deducted to 0 and the next key in the q is also 0.
+        // Thus while-loop, and don't check elapsed_ms
+        while (!sleepq.empty()) {
+            if (auto &ms = sleepq.first_key(); ms <= elapsed_ms) {
+                elapsed_ms -= ms;
                 // Given that the queue is nonempty, dequeue must have value
                 // TODO unify the argument/return value: use either pid or procs
                 ready(&procs[sleepq.dequeue().value()], g);
                 woke = true;
+            } else {
+                ms -= elapsed_ms;
+                break;
             }
         }
     }

@@ -229,6 +229,8 @@ if [[ $no_virtio == false ]] {
     # requiring a manual drop into disk/ -- inject it the same way if present.
     [[ -n ${DOOM_WAD-} ]] && mcopy -i $disk_img -o $DOOM_WAD ::DOOM1.WAD
 
+    [[ -n ${GB_ROM-} ]] && mcopy -i $disk_img -o $GB_ROM ::RHYTHM.GB
+
     data_disk_args="-drive id=drive0,file=$disk_img,format=raw,if=none \
       -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.$((virtio_bus++))"
 

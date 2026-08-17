@@ -130,6 +130,12 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
         printf("Process created: doom (%d)\n", doom->pid);
     }
 
+    proc::process *peanut = nullptr;
+    if (has_gpu) {
+        peanut = proc::create({ _binary_peanut_bin_start, reinterpret_cast<size_t>(_binary_peanut_bin_size) }, true);
+        printf("Process created: peanut-gb (%d)\n", peanut->pid);
+    }
+
     // Wake the secondary harts now that every proc slot exists but before the resumes
     for (size_t h = 0; h < hart::MAX; h++) {
         if (hart::id() == h)
@@ -152,6 +158,7 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     if (has_gpu) {
         proc::resume(virtio_gpu);
         proc::resume(doom);
+        // proc::resume(peanut);
     } else {
         proc::resume(proc_b);
         proc::resume(proc_a);

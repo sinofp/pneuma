@@ -43,6 +43,7 @@
           LLD = "${t.lld}/bin/ld.lld";
           FATFS_SRC = "${fatfsSrcFor pkgs}";
           DOOMGENERIC_SRC = "${doomgenericSrcFor pkgs}";
+          PEANUT_SRC = "${peanutSrcFor pkgs}";
         };
 
       fatfsSrcFor =
@@ -62,6 +63,15 @@
           hash = "sha256-JGa7gTvSvxlmCLw9E+RDMt5RRjorNuA0GnC1kU9xnZ0=";
         };
 
+      peanutSrcFor =
+        pkgs:
+        pkgs.fetchFromGitHub {
+          owner = "deltabeard";
+          repo = "peanut-gb";
+          rev = "8e656982f08663785794b84823d3e27f856fdb7f";
+          hash = "sha256-LoNaGrb5LgLfWzRg1yMwX9w69I1Ro53ICLFS5adVbz8=";
+        };
+
       doom1WadFor =
         pkgs:
         pkgs.fetchurl {
@@ -69,6 +79,12 @@
           hash = "sha256-HX1DvlAeZ9kn5BXguPPinDvzMHXoWXIYFvZSpSbKx3E=";
         };
 
+      rhythmLandRomFor =
+        pkgs:
+        pkgs.fetchurl {
+          url = "https://github.com/sinusoid-studios/rhythm-land/releases/download/v1.0.1/rhythm-land.gb";
+          hash = "sha256-ggtOVDvBr7gLZr6BrKZPQp6XyMD0tTdzUDU3iDgasWA=";
+        };
     in
     {
       devShells = forAllSystems (
@@ -169,6 +185,7 @@
               export UBOOT_QEMU="${ubootQemu}/u-boot.bin"
               export PATH="${toolchain.clang}/bin:${ubootQemu}:$PWD/scripts:$PATH" # clang-format/clangd, mkimage (from U-Boot), run, fmt
               export DOOM_WAD="${doom1WadFor pkgs}"
+              export GB_ROM="${rhythmLandRomFor pkgs}"
               echo "RISC-V bare-metal development environment loaded"
               echo "Clang: $CLANG"
               echo "LLD: $LLD"

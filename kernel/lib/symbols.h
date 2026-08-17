@@ -19,4 +19,5 @@ extern uint8_t _binary_a_bin_start[], _binary_a_bin_size[];
 extern uint8_t _binary_b_bin_start[], _binary_b_bin_size[];
 extern uint8_t _binary_libc_test_bin_start[], _binary_libc_test_bin_size[];
 extern uint8_t _binary_doom_bin_start[], _binary_doom_bin_size[];
+extern uint8_t _binary_peanut_bin_start[], _binary_peanut_bin_size[];
 }

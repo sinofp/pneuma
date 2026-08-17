@@ -26,6 +26,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/require-env.cmake)
 require_env(LLD)
 require_env(FATFS_SRC)
 require_env(DOOMGENERIC_SRC)
+require_env(PEANUT_SRC)
 
 set(SCRIPTS ${CMAKE_SOURCE_DIR}/scripts)
 set(ARCHFLAGS --target=${PNEUMA_TARGET} -march=${PNEUMA_MARCH} -mabi=${PNEUMA_MABI})
@@ -176,7 +177,7 @@ target_include_directories(libc SYSTEM PRIVATE ${LIBC_INC} ${DRV_INC})
 file(GLOB USER_C_SRCS   CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/user/*.c)
 file(GLOB USER_CXX_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/user/*.cc)
 file(GLOB DRV_CXX_SRCS  CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/driver/*.cc)
-list(FILTER USER_C_SRCS EXCLUDE REGEX "doomgeneric_rv")
+list(FILTER USER_C_SRCS EXCLUDE REGEX "_rv") # TODO move them to a new dir?
 set(PROGRAMS ${USER_C_SRCS} ${USER_CXX_SRCS} ${DRV_CXX_SRCS})
 
 foreach(src ${PROGRAMS})
@@ -251,6 +252,28 @@ target_link_options(doom PRIVATE
 set_target_properties(doom PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/user/user.ld)
 
 embed_elf(doom)
+
+# ---------------------------------------------------------------------------
+# Peanut-GB
+# ---------------------------------------------------------------------------
+# Peanut-GB is a single unpatched header, so unlike doom and FatFs there is
+# nothing to stage into the build dir: include it straight out of the store.
+add_executable(peanut user/peanut_rv.c ${PEANUT_SRC}/peanut_gb.h)
+set_target_properties(peanut PROPERTIES
+  SUFFIX ".elf"
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+target_compile_options(peanut PRIVATE ${FATFS_C})
+# libc/include ahead of upstream, matching the flake's search order.
+target_include_directories(peanut PRIVATE ${LIBC_INC} ${PEANUT_SRC})
+target_include_directories(peanut SYSTEM PRIVATE ${DRV_INC})
+target_link_libraries(peanut PRIVATE libc)
+target_link_options(peanut PRIVATE
+  ${LINKFLAGS} --ld-path=${LLD}
+  -Wl,-T,${CMAKE_SOURCE_DIR}/user/user.ld
+  -Wl,-Map,${CMAKE_BINARY_DIR}/peanut.map)
+set_target_properties(peanut PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/user/user.ld)
+
+embed_elf(peanut)
 
 # ---------------------------------------------------------------------------
 # Kernel: all kernel/*.cc + every embedded blob, linked with kernel.ld.
