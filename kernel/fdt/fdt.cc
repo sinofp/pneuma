@@ -1,14 +1,24 @@
 #include "fdt/fdt.h"
+#include "dev/mmio.h"
 #include "lib/common.h"
 #include "lib/hart.h"
 #include "lib/panic.h"
 #include "lib/span.h"
 #include "lib/symbols.h"
+#include "mem/mem.h"
 #include "trap/plic.h"
+#include <virtio.h>
 
 using fdt::uninitialised;
 
 namespace {
+constexpr size_t MAX_VIRTIO_DEVS = 8;
+constexpr size_t MAX_UART_DEVS = 1;
+size_t virtio_dev_cnt = 0, uart_dev_cnt = 0;
+
+constexpr uint32_t GPU_DEVICE_ID = 16;
+
+static_assert(fdt::MAX_DEVS == MAX_VIRTIO_DEVS + MAX_UART_DEVS, "devs[] must hold every kind at once");
 
 enum class FDT : uint32_t {
     MAGIC = 0xd00dfeed,
@@ -76,12 +86,15 @@ bool startswith(const char *string, const char *value) {
     return true;
 }
 
-bool string_prop_has(const char *data, uint32_t len, const char *target) {
-    // "compatible" is a list of NUL-terminated strings packed back-to-back.
-    uint32_t i = 0;
+// A string-list property ("compatible", "status", ...) is NUL-terminated strings packed back-to-back,
+// so the list only makes sense together with its length -- taking a span keeps the two inseparable.
+bool string_prop_has(span<const char> list, const char *target) {
+    const auto *data = list.data();
+    const auto len = list.size();
+    size_t i = 0;
     while (i < len) {
         const char *s = data + i;
-        uint32_t j = 0;
+        size_t j = 0;
         while (i + j < len and s[j] != '\0')
             ++j;
         if (len <= i + j)
@@ -97,19 +110,25 @@ bool string_prop_has(const char *data, uint32_t len, const char *target) {
 struct node_ctx {
     int address_cells = -1;
     int size_cells = -1;
+    // Points into the DTB blob, which mem::reserve keeps alive for the life of the kernel.
+    span<const char> compatible;
     bool is_memory;
     bool is_rsvd_memory;
     bool is_cpus;
     bool is_cpu;
     bool is_interrupt_controller;
     bool is_virtio;
+    bool is_uart;
     bool is_plic;
     uint64_t reg_addr = uninitialised;
     uint64_t reg_size = uninitialised;
+    uint32_t reg_shift = 0;
+    uint32_t reg_io_width = 1;
     uint32_t irq = uninitialised; // TODO move out?
     cell_view irq_ext;
-    bool reg_set; // TODO remove?
-    bool irq_set; // matches interrupts or interrupts-extended (only for PLIC) TODO remove?
+    bool reg_set;              // TODO remove?
+    bool reg_has_more = false; // reg holds further (address, size) pairs beyond the one parsed
+    bool irq_set;              // matches interrupts or interrupts-extended (only for PLIC) TODO remove?
     uint32_t phandle = uninitialised;
     bool has_mmu = false;  // TODO remove?
     bool status_ok = true; // absent is okay
@@ -120,8 +139,8 @@ constexpr size_t max_depth = 16;
 } // namespace
 
 namespace fdt {
-virtio_device virtio_devices[MAX_VIRTIO_DEVICES];
-size_t virtio_device_count = 0;
+fdt_dev_entry devs[MAX_DEVS];
+size_t dev_cnt = 0;
 } // namespace fdt
 
 namespace plic {
@@ -135,9 +154,11 @@ paddr_t free_ram_end;
 
 namespace fdt {
 
-uint32_t clk_freq_sec = uninitialised;
 uint32_t clk_freq_ms = uninitialised;
-uint32_t clk_freq_us = uninitialised;
+
+bool is_compatible(const fdt_dev_entry &entry, const char *target) { return string_prop_has(entry.compatible, target); }
+
+bool has_gpu = false;
 
 // https://devicetree-specification.readthedocs.io/en/stable/flattened-format.html#header
 struct header {
@@ -158,6 +179,9 @@ void init(const header *fdt_ptr) {
     if (static_cast<uint32_t>(fdt_ptr->magic) != static_cast<uint32_t>(FDT::MAGIC))
         PANIC("Wrong FDT header magic");
 
+    // So we can use pointer to compatible safely
+    mem::reserve({ reinterpret_cast<const uint8_t *>(fdt_ptr), static_cast<uint32_t>(fdt_ptr->totalsize) });
+
     auto *struct_base = reinterpret_cast<const uint8_t *>(fdt_ptr) + static_cast<uint32_t>(fdt_ptr->off_dt_struct);
     auto *strings_base = reinterpret_cast<const char *>(fdt_ptr) + static_cast<uint32_t>(fdt_ptr->off_dt_strings);
     auto *struct_end = struct_base + static_cast<uint32_t>(fdt_ptr->size_dt_struct);
@@ -167,9 +191,6 @@ void init(const header *fdt_ptr) {
 
     node_ctx stack[max_depth];
     size_t depth = -1;
-
-    bool virtio_found = false;
-    uint64_t virtio_first = 0;
 
     while (p < end) {
         auto token = static_cast<FDT>(static_cast<uint32_t>(*p++));
@@ -187,27 +208,39 @@ void init(const header *fdt_ptr) {
             p = reinterpret_cast<const be<uint32_t> *>(reinterpret_cast<const uint8_t *>(p) + skip);
 
             if (++depth < max_depth)
-                stack[depth] = {};
+                stack[depth] = { .is_memory = startswith(name, "memory@"),
+                                 .is_rsvd_memory = !strcmp(name, "reserved-memory"),
+                                 .is_cpus = !strcmp(name, "cpus"),
+                                 .is_cpu = startswith(name, "cpu@"),
+                                 .is_interrupt_controller = !strcmp(name, "interrupt-controller") };
             else
                 PANIC("FDT exceeds maximum depth");
-            stack[depth].is_cpus = !strcmp(name, "cpus");
-            stack[depth].is_cpu = startswith(name, "cpu@");
-            stack[depth].is_interrupt_controller = !strcmp(name, "interrupt-controller");
-            stack[depth].is_memory = startswith(name, "memory@");
-            stack[depth].is_rsvd_memory = !strcmp(name, "reserved-memory");
             continue;
         }
         case FDT::END_NODE: {
             if (depth < 0)
                 PANIC("FDT_END_NODE before the first FDT_BEGIN_NODE");
             auto &ctx = stack[depth];
-            if (ctx.is_virtio and ctx.reg_set and ctx.irq_set) {
-                // Collect all virtio devices
-                if (virtio_device_count < MAX_VIRTIO_DEVICES) {
-                    virtio_devices[virtio_device_count].mmio_base = static_cast<paddr_t>(ctx.reg_addr);
-                    virtio_devices[virtio_device_count].irq = ctx.irq;
-                    virtio_device_count++;
+            if (ctx.is_virtio and ctx.reg_set and ctx.irq_set and virtio_dev_cnt < MAX_VIRTIO_DEVS) {
+                if (auto device_id = mmio::read<uint32_t>(static_cast<paddr_t>(ctx.reg_addr), virtio::REG_DEVICE_ID);
+                    device_id) {
+                    ++virtio_dev_cnt;
+                    has_gpu |= GPU_DEVICE_ID == device_id;
+                    devs[dev_cnt++] = { .dev = { .mmio_base = static_cast<paddr_t>(ctx.reg_addr),
+                                                 .mmio_size = static_cast<unsigned long>(ctx.reg_size),
+                                                 .irq = ctx.irq,
+                                                 .device_id = device_id },
+                                        .compatible = ctx.compatible };
                 }
+            } else if (ctx.is_uart and ctx.reg_set and ctx.irq_set and ctx.status_ok and uart_dev_cnt < MAX_UART_DEVS) {
+                ++uart_dev_cnt;
+                // TODO paser chosen and select the initialised UART using /chosen/stdout-path
+                devs[dev_cnt++] = { .dev = { .mmio_base = static_cast<paddr_t>(ctx.reg_addr),
+                                             .mmio_size = static_cast<unsigned long>(ctx.reg_size),
+                                             .reg_shift = ctx.reg_shift,
+                                             .reg_io_width = ctx.reg_io_width,
+                                             .irq = ctx.irq },
+                                    .compatible = ctx.compatible };
             } else if (ctx.is_plic and ctx.reg_set and ctx.irq_set) {
                 plic::start_addr = static_cast<paddr_t>(ctx.reg_addr);
                 plic::end_addr = plic::start_addr + ctx.reg_size;
@@ -222,11 +255,17 @@ void init(const header *fdt_ptr) {
                 free_ram_end = ctx.reg_addr + ctx.reg_size;
                 // printf("fdt::init: memory addr: 0x%lx, size: 0x%lx, calculated free_ram_end: %p\n", ctx.reg_addr,
                 //        ctx.reg_size, free_ram_end);
-            } else if (0 < depth and stack[depth - 1].is_rsvd_memory) {
-                // We assume reserved memories are allocated at the start of RAM
-                auto kernel_base = reinterpret_cast<paddr_t>(__kernel_base);
-                if (ctx.reg_addr < kernel_base and kernel_base < (ctx.reg_addr + ctx.reg_size))
-                    PANIC("reserved memory overlaps with __kernel_base");
+            } else if (0 < depth and stack[depth - 1].is_rsvd_memory and ctx.reg_set) {
+                if (ctx.reg_has_more) [[unlikely]]
+                    PANIC("reserved memory node has a multi-pair reg; only the first pair is parsed");
+
+                if (ctx.reg_addr < reinterpret_cast<paddr_t>(__free_ram) and
+                    reinterpret_cast<paddr_t>(__kernel_base) < ctx.reg_addr + ctx.reg_size) [[unlikely]]
+                    PANIC("reserved memory overlaps the kernel image"); // [__kernel_base, __free_ram)
+
+                if (reinterpret_cast<paddr_t>(__free_ram) <= ctx.reg_addr) [[unlikely]]
+                    mem::reserve({ reinterpret_cast<const uint8_t *>(static_cast<paddr_t>(ctx.reg_addr)),
+                                   static_cast<size_t>(ctx.reg_size) });
             }
             --depth;
             continue;
@@ -257,16 +296,19 @@ void init(const header *fdt_ptr) {
 
             if (ctx.is_cpus and !strcmp(prop_name, "timebase-frequency") and sizeof(be<uint32_t>) <= len) {
                 // DT spec defines timebase-frequency as a single 32-bit cell.
-                fdt::clk_freq_sec = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
-                fdt::clk_freq_ms = fdt::clk_freq_sec / 1000u;
-                fdt::clk_freq_us = fdt::clk_freq_ms / 1000u;
+                const auto hz = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+                fdt::clk_freq_ms = hz / 1000u;
             } else if (!strcmp(prop_name, "compatible") and len) {
-                const char *data = reinterpret_cast<const char *>(prop_data);
-                if (string_prop_has(data, len, "virtio,mmio"))
+                ctx.compatible = { reinterpret_cast<const char *>(prop_data), len };
+                if (string_prop_has(ctx.compatible, "virtio,mmio"))
                     ctx.is_virtio = true;
-                else if (string_prop_has(data, len, "riscv,plic0") || string_prop_has(data, len, "sifive,plic-1.0.0"))
+                else if (string_prop_has(ctx.compatible, "ns16550a") or
+                         string_prop_has(ctx.compatible, "snps,dw-apb-uart"))
+                    ctx.is_uart = true;
+                else if (string_prop_has(ctx.compatible, "riscv,plic0") or
+                         string_prop_has(ctx.compatible, "sifive,plic-1.0.0"))
                     ctx.is_plic = true;
-                else if (string_prop_has(data, len, "sifive,s7"))
+                else if (string_prop_has(ctx.compatible, "sifive,s7"))
                     ctx.is_s7 = true;
                 continue;
             }
@@ -285,7 +327,16 @@ void init(const header *fdt_ptr) {
                 ctx.reg_addr = cells.take_u64(parent.address_cells);
                 ctx.reg_size = cells.take_u64(parent.size_cells);
                 ctx.reg_set = true;
-            } else if (!strcmp(prop_name, "interrupts") and sizeof(be<uint32_t>) <= len) {
+                // A reg may carry several pairs while the cell_view above spans exactly one, so the rest go unread.
+                // Record that so callers who cannot tolerate the loss can say so.
+                const auto pair_bytes =
+                    static_cast<uint32_t>((parent.address_cells + parent.size_cells) * sizeof(be<uint32_t>));
+                ctx.reg_has_more = pair_bytes < len;
+            } else if (!strcmp(prop_name, "reg-shift") and sizeof(be<uint32_t>) <= len)
+                ctx.reg_shift = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+            else if (!strcmp(prop_name, "reg-io-width") and sizeof(be<uint32_t>) <= len)
+                ctx.reg_io_width = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
+            else if (!strcmp(prop_name, "interrupts") and sizeof(be<uint32_t>) <= len) {
                 ctx.irq = static_cast<uint32_t>(*reinterpret_cast<const be<uint32_t> *>(prop_data));
                 ctx.irq_set = true;
             } else if (!strcmp(prop_name, "interrupts-extended") and
@@ -299,7 +350,7 @@ void init(const header *fdt_ptr) {
                 // VF2 is Sv39, virt 32 is Sv32, while virt 64 is Sv57
                 ctx.has_mmu = startswith(reinterpret_cast<const char *>(prop_data), "riscv,sv");
             else if (!strcmp(prop_name, "status") and 4 <= len)
-                ctx.status_ok = string_prop_has(reinterpret_cast<const char *>(prop_data), len, "okay");
+                ctx.status_ok = string_prop_has({ reinterpret_cast<const char *>(prop_data), len }, "okay");
 
         } break;
         default:

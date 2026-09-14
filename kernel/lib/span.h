@@ -6,7 +6,11 @@ template <typename T> class span {
     size_t n;
 
 public:
-    span(T *pointer, size_t size)
+    constexpr span()
+        : p(nullptr)
+        , n(0) {}
+
+    constexpr span(T *pointer, size_t size)
         : p(pointer)
         , n(size) {}
 

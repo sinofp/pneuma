@@ -52,20 +52,6 @@ int putchar(int ch) {
         return EOF;
 }
 
-// DBCN: Console Read (FID #1), struct sbiret sbi_debug_console_read(unsigned long num_bytes, unsigned long
-int getchar() {
-    // base_addr_lo, unsigned long base_addr_hi)
-    char ch = '\0'; // C Manual: 'Character values are returned as an unsigned char converted to an int'
-    const unsigned long num_bytes = sizeof(char);
-    const auto base_addr = reinterpret_cast<xlen_t>(&ch);
-    const auto ret = sbi_call(num_bytes, base_addr, 0, 0, 0, 0, 1, EID::DBCN);
-    if (SBI_SUCCESS == ret.error and num_bytes == ret.uvalue)
-        return ch;
-    else
-        // This is a non-blocking call, so can return SBI_SUCCESS with no value. It's an error for us
-        return EOF;
-}
-
 namespace sbi {
 
 // Set Timer (FID #0) struct sbiret sbi_set_timer(uint64_t stime_value)

@@ -32,12 +32,12 @@ set ups [expr {$smp - 1 - $is_vf2}]
 spawn $repo_root/scripts/run {*}$argv
 
 # Kernel boot lines print before user procs run, so they arrive unmangled.
-must "Process created: libc-test (5)"
-must "Process created: a (6)"
-must "Process created: b (7)"
-must "Process created: shell (8)"
+must "Process created: a"
+must "Process created: b"
+must "Process created: libc-test"
+must "Process created: shell"
 if {$has_gpu} {
-    must "Process created: doom (9)"
+    must "Process created: doom"
 }
 
 if {$is_smp} {
@@ -59,12 +59,7 @@ if {$is_smp} {
 if {$has_gpu} {
     must "I_InitGraphics: Auto-scaling factor: "
 } else {
-    if {!$is_smp} {
-        # It's hard to get unmangled proc-a output on SMP
-        must "proc-a: reply from pid 7: OK"
-    }
-    # Kernel always hold console lock, so it's fine to match this after proc-a&b finishes
-    must "process 6 exited"
+    must "proc-a: reply from pid 7: OK"
 }
 
 # Shell tests

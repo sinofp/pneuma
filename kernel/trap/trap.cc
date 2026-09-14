@@ -4,6 +4,7 @@
 #include "lib/hart.h"
 #include "proc/proc.h"
 #include "proc/qtab.h"
+#include "shared.h"
 #include "trap/csr.h"
 #include "trap/driver.h"
 #include "trap/plic.h"
@@ -188,27 +189,15 @@ namespace {
 void handle_syscall(trap::frame *f) {
     switch (f->a3) {
     case SYS_PUTCHAR: {
-        // TODO create a SYS_PUTS.
+        // Only used as a fallback in console proc for error reporting
         // Currently the console log only make sure kernel printf don't interleave with user
         lock::guard g{ lock::console };
         putchar(f->a0);
         break;
     }
-    case SYS_GETCHAR:
-        for (;;) {
-            long ch = getchar();
-            if (ch != EOF) {
-                f->a0 = ch;
-                break;
-            }
-
-            // Let other ready procs run for a brief moment
-            proc::sleep_ms(1);
-        }
-        break;
     case SYS_EXIT: {
-        printf("process %d exited\n", proc::current().pid);
-        // Park as EXITED and wait until we change satp to recyle the PCB
+        // printf("process %d exited\n", proc::current().pid);
+        //  Park as EXITED and wait until we change satp to recyle the PCB
         csr::intr_guard ig;
         lock::guard g{ lock::bkl };
         proc::current().state = proc::state_t::EXITED;
@@ -230,8 +219,8 @@ void handle_syscall(trap::frame *f) {
         // printf("\n\n\nRecv(addr=%p, addr[0]=%d, sender=%ld)\n", f->a0, *reinterpret_cast<uint8_t *>(f->a0), f->a2);
         f->a0 = static_cast<xlen_t>(proc::message_passing({ reinterpret_cast<uint8_t *>(f->a0), f->a1 }, f->a2, false));
         break;
-    case SYS_FDT_VIRTIO:
-        f->a0 = driver::sys_fdt_virtio(f->a0, f->a1);
+    case SYS_FDT_QUERY:
+        f->a0 = driver::sys_fdt_query(reinterpret_cast<const char *>(f->a0), f->a1, f->a2);
         break;
     case SYS_MMIO_MAP:
         f->a0 = driver::sys_mmio_map(f->a0, f->a1);
@@ -249,7 +238,7 @@ void handle_syscall(trap::frame *f) {
         f->a0 = driver::sys_page_walk(f->a0, f->a1, f->a2);
         break;
     case SYS_REBOOT:
-        printf("system reset requested by process %d\n", proc::current().pid);
+        // printf("system reset requested by process %d\n", proc::current().pid);
         sbi::system_reset(1);
         PANIC("unreachable");
     default:

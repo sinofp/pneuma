@@ -54,22 +54,46 @@ bool wake_if_waiting(proc::process *p, uint32_t irq, lock::guard &g) {
     return true;
 }
 
-xlen_t sys_fdt_virtio(vaddr_t user_buf, size_t max) {
-    auto count = min(max, fdt::virtio_device_count);
-    auto *out = reinterpret_cast<virtio::virtio_dev_t *>(user_buf);
-    for (size_t i = 0; i < count; i++) {
-        const auto &src = fdt::virtio_devices[i];
-        out[i].mmio_base = src.mmio_base;
-        out[i].vq_paddr = src.vq_paddr;
-        out[i].irq = src.irq;
-        out[i].device_id = src.device_id;
-    }
-    return count;
+xlen_t sys_fdt_query(const char *compatible, vaddr_t user_buf, size_t max) {
+    // TODO check user_buf has U bit.
+    if (user_buf < proc::USER_BASE or reinterpret_cast<vaddr_t>(__kernel_base) <= user_buf)
+        PANIC("Strange user_buf in fdt_query");
+
+    // Assumes user_buf is an array in one page
+    auto *dst = reinterpret_cast<fdt_dev_t *>(user_buf);
+    xlen_t j = 0;
+    for (size_t i = 0; i < fdt::dev_cnt and j < max; ++i)
+        // Both User and Kernel is mapped, therefore it's safe to use the string pointer
+        if (const auto &src = fdt::devs[i]; fdt::is_compatible(src, compatible))
+            dst[j++] = src.dev;
+    return j;
 }
 
 xlen_t sys_mmio_map(paddr_t paddr, size_t npages) {
     if (!is_aligned(paddr, mem::PAGE_SIZE))
         return 0;
+
+    // I got a npages==526808 for an out-of-bound fdt_dev_t
+    if (512 < npages)
+        return 0;
+
+    paddr_t end = paddr + npages * mem::PAGE_SIZE;
+    // overflow
+    if (end < paddr)
+        return 0;
+
+    // So the user can't map kernel code.
+    bool invalid = true;
+    for (size_t i = 0; i < fdt::dev_cnt; ++i)
+        if (const auto &dev = fdt::devs[i].dev;
+            dev.mmio_base <= paddr and end <= align_up(dev.mmio_base + dev.mmio_size, mem::PAGE_SIZE) or
+            dev.device_id and dev.vq_paddr == paddr and npages == virtio::virtq_pages) {
+            invalid = false;
+            break;
+        }
+    if (invalid)
+        return 0; // TODO more error code?
+
     csr::intr_guard ig;
     lock::guard g{ lock::bkl }; // map_page may alloc_frame for intermediate tables
     using enum mem::pte_t::flag;

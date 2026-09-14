@@ -12,6 +12,8 @@ int readline(char *buf, int len) {
     int i = 0;
     for (;;) {
         char ch = getchar();
+        if (EOF == ch)
+            continue;
         if ('\b' == ch or 127 == ch /* DEL */) {
             if (i > 0) {
                 --i;

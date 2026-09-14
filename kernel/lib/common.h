@@ -8,6 +8,7 @@
 #define va_arg                   __builtin_va_arg
 
 #define align_up(value, align)   __builtin_align_up(value, align)
+#define align_down(value, align) __builtin_align_down(value, align)
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
 // TODO concept?
@@ -24,29 +25,8 @@ size_t strlen(const char *);
 void printf(const char *__restrict__, ...);
 void printf_unlocked(const char *__restrict__, ...);
 
-// Below functions are implemented in kernel using OpenSBI, and user using
-// syscall
+// Below functions are implemented in kernel using OpenSBI
 extern int putchar(int);
-extern int getchar();
 }
-
-// Techinically, they should be xlen_t, because they need to fit in a0
-// However, I don't want to expose xlen_t to user application.
-// TODO enum class
-// NOTE shuold match libc/include/sys/syscall.h
-constexpr unsigned long SYS_PUTCHAR = 1;
-constexpr unsigned long SYS_GETCHAR = 2;
-constexpr unsigned long SYS_EXIT = 3;
-constexpr unsigned long SYS_SLEEP = 6;
-constexpr unsigned long SYS_GET_TICKS = 8;
-constexpr unsigned long SYS_MP_SSEND = 12;
-constexpr unsigned long SYS_MP_RECV = 13;
-constexpr unsigned long SYS_FDT_VIRTIO = 14;
-constexpr unsigned long SYS_MMIO_MAP = 15;
-constexpr unsigned long SYS_DMA_ALLOC = 16;
-constexpr unsigned long SYS_IRQ_WAIT = 17;
-constexpr unsigned long SYS_PAGE_WALK = 18;
-constexpr unsigned long SYS_IRQ_CLAIM = 19;
-constexpr unsigned long SYS_REBOOT = 20;
 
 constexpr int EOF = -1;

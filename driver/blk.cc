@@ -83,8 +83,8 @@ public:
     bool probe_and_setup() override {
         using namespace virtio;
 
-        virtio_dev_t devs[8];
-        auto n = fdt_virtio(devs, sizeof(devs) / sizeof(devs[0]));
+        fdt_dev_t devs[8];
+        auto n = fdt_query("virtio,mmio", devs, sizeof(devs) / sizeof(devs[0]));
 
         size_t best = static_cast<size_t>(-1);
         uint64_t best_cap = 0;

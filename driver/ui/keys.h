@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define EV_KEY           1
+#define EV_KEY      1
 
 #define KEY_PRESS   1
 #define KEY_RELEASE 0

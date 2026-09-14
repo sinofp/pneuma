@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
@@ -190,6 +191,8 @@ int system(const char *command) {
 
 [[noreturn]]
 void exit(int status /*status is ignored for now*/) {
+    fflush(stdout);
+    fflush(stderr);
     syscall(SYS_EXIT, 0, 0, 0);
     for (;;)
         ; // Just in case!

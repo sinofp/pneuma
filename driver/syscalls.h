@@ -2,7 +2,7 @@
 
 // User-side inline wrappers for the driver-kit syscalls. Kernel does not include this
 // (it dispatches these syscalls internally). C-compatible except for `fdt_virtio` which
-// takes a namespaced `virtio::virtio_dev_t` (guarded by __cplusplus).
+// takes a namespaced `virtio::fdt_dev_t` (guarded by __cplusplus).
 
 #include <stddef.h>
 #include <stdint.h>
@@ -35,10 +35,12 @@ static inline long irq_claim(uint32_t irq) { return (long) syscall(SYS_IRQ_CLAIM
 static inline long irq_wait(uint32_t irq) { return (long) syscall(SYS_IRQ_WAIT, irq, 0, 0); }
 
 #ifdef __cplusplus
+#include <shared.h>
 #include <virtio.h>
 
-// Copy kernel's virtio device table into caller; returns count actually written.
-static inline size_t fdt_virtio(virtio::virtio_dev_t *buf, size_t max) {
-    return syscall(SYS_FDT_VIRTIO, (unsigned long) buf, max, 0);
+// Copy kernel's device table into caller; returns count actually written.
+static inline size_t fdt_query(const char *compatible, fdt_dev_t *buf, size_t max) {
+    return syscall(SYS_FDT_QUERY, reinterpret_cast<unsigned long>(compatible), reinterpret_cast<unsigned long>(buf),
+                   max);
 }
 #endif

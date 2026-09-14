@@ -115,8 +115,8 @@ bool dead; // set on first command timeout; all later requests fail fast
 #define SCRATCH_PADDR(field) (scratch_paddr + offsetof(scratch_t, field))
 
 bool probe_and_setup() {
-    virtio_dev_t devs[8];
-    auto n = fdt_virtio(devs, sizeof(devs) / sizeof(devs[0]));
+    fdt_dev_t devs[8];
+    auto n = fdt_query("virtio,mmio", devs, sizeof(devs) / sizeof(devs[0]));
 
     size_t best = static_cast<size_t>(-1);
     for (size_t i = 0; i < n; i++) {

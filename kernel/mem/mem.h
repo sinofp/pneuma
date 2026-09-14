@@ -4,6 +4,7 @@
 #include "mem/pagetable.h"
 
 namespace mem {
+void reserve(span<const uint8_t>);
 void init();
 
 paddr_t alloc_frame();

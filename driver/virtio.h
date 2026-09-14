@@ -73,13 +73,6 @@ struct [[gnu::packed]] virtq {
     uint16_t last_used_index;
 };
 
-// One entry per virtio-mmio node discovered from the device tree. The kernel returns
-// an array of these via SYS_FDT_VIRTIO; both kernel and user driver see the same layout.
-struct virtio_dev_t {
-    unsigned long mmio_base;
-    unsigned long vq_paddr; // single pre-reserved virtq region per device
-    uint32_t irq;
-    uint32_t device_id;
-};
+constexpr auto virtq_pages = __builtin_align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE;
 
 } // namespace virtio

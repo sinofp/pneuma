@@ -64,9 +64,6 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     fdt::init(fdt_ptr);
     printf("dtb:\n  ptr=%p, plic_base=0x%lx, __free_ram=%p, free_ram_end=0x%lx\n", fdt_ptr,
            static_cast<unsigned long>(plic::start_addr), reinterpret_cast<paddr_t>(__free_ram), free_ram_end);
-    for (size_t i = 0; i < fdt::virtio_device_count; i++)
-        printf("  virtio device %d: base=0x%lx, irq=%d\n", i, fdt::virtio_devices[i].mmio_base,
-               fdt::virtio_devices[i].irq);
 
     trap::init();
 
@@ -88,8 +85,8 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     //   PID 2 = blk
     //   PID 3 = virtio-input
     //   PID 4 = virtio-gpu
-    //   PID 5 = libc-test (for smoke.exp)
-    //   PID 6 = proc-a
+    //   PID 5 = console
+    //   PID 6 = proc-a (both in code and smoke.exp)
     //   PID 7 = proc-b
     auto *fs = proc::create({ _binary_fs_bin_start, reinterpret_cast<size_t>(_binary_fs_bin_size) }, true);
     proc::chprio(fs, proc::prio_t::V);
@@ -104,22 +101,25 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     proc::chprio(virtio_input, proc::prio_t::V);
     printf("Process created: virtio-input (%d)\n", virtio_input->pid);
 
-    const bool has_gpu = fdt::has_device_id(16);
+    const bool has_gpu = fdt::has_gpu;
     // Create virtio-gpu regardless has gpu or not, so later apps have fixed pid
     auto *virtio_gpu =
         proc::create({ _binary_virtio_gpu_bin_start, reinterpret_cast<size_t>(_binary_virtio_gpu_bin_size) });
     proc::chprio(virtio_gpu, proc::prio_t::V);
     printf("Process created: virtio-gpu (%d)\n", virtio_gpu->pid);
 
-    auto *libc_test =
-        proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) }, true);
-    printf("Process created: libc-test (%d)\n", libc_test->pid);
+    auto *console = proc::create({ _binary_console_bin_start, reinterpret_cast<size_t>(_binary_console_bin_size) });
+    printf("Process created: console (%d)\n", console->pid);
 
     auto *proc_a = proc::create({ _binary_a_bin_start, reinterpret_cast<size_t>(_binary_a_bin_size) });
     printf("Process created: a (%d)\n", proc_a->pid);
 
     auto *proc_b = proc::create({ _binary_b_bin_start, reinterpret_cast<size_t>(_binary_b_bin_size) });
     printf("Process created: b (%d)\n", proc_b->pid);
+
+    auto *libc_test =
+        proc::create({ _binary_libc_test_bin_start, reinterpret_cast<size_t>(_binary_libc_test_bin_size) }, true);
+    printf("Process created: libc-test (%d)\n", libc_test->pid);
 
     auto *shell = proc::create({ _binary_shell_bin_start, reinterpret_cast<size_t>(_binary_shell_bin_size) });
     printf("Process created: shell (%d)\n", shell->pid);
@@ -150,6 +150,8 @@ void kernel_main([[maybe_unused]] const xlen_t hartid, const fdt::header *fdt_pt
     }
     __atomic_store_n(&smp_ready, 1, __ATOMIC_RELEASE);
 
+    // Resume console proc first so user space can use printf
+    proc::resume(console);
     proc::resume(blk);
     proc::resume(virtio_input);
     proc::resume(fs);

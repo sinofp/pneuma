@@ -1,3 +1,4 @@
+#include <ipc/console.h>
 #include <ipc/fs.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,15 +16,45 @@ using vaddr_t = uintptr_t;
 FILE *stdout = nullptr;
 FILE *stderr = nullptr;
 
-int putchar(int ch) { return syscall(SYS_PUTCHAR, ch, 0, 0); }
-
-int getchar() { return syscall(SYS_GETCHAR, 0, 0, 0); }
-
 namespace {
 
 int fs_fd(FILE *stream) { return static_cast<int>(reinterpret_cast<intptr_t>(stream)); }
 
+console_req_t console_out{ CONSOLE_OP_WRITE };
+
+void console_flush() {
+    ssend(&console_out, offsetof(decltype(console_out), data) + console_out.len /* Might be shorter than the MAX */,
+          CONSOLE_SERVER);
+    console_out = { CONSOLE_OP_WRITE };
+}
+
 } // namespace
+
+int putchar(int ch) {
+    console_out.data[console_out.len++] = ch;
+    if (CONSOLE_MAX_DATA == console_out.len or '\n' == ch)
+        console_flush();
+    return ch;
+}
+
+int getchar() {
+    console_flush(); // For shell prompt
+
+    console_req_t console_in{ CONSOLE_OP_READ };
+    console_resp_t resp;
+
+    for (;;) {
+        ssend(&console_in, offsetof(decltype(console_in), len), CONSOLE_SERVER);
+        if (recv(&resp, sizeof(resp), CONSOLE_SERVER) < 0)
+            return EOF;
+        if (resp.has_char)
+            break;
+        // Let other ready procs run for a brief moment
+        sleep_ms(1);
+    }
+
+    return resp.ch;
+}
 
 // File operations
 
@@ -116,8 +147,13 @@ long ftell(FILE *stream) {
 }
 
 int fflush(FILE *stream) {
-    if (nullptr == stream)
-        return EOF;
+    // if (nullptr == stream)
+    //     return EOF;
+    // TODO give stdout and stderr real FD, not nullptr
+    if (stdout == stream or stderr == stream) {
+        console_flush();
+        return 0;
+    }
     fs_req_fd_t req{ FS_OP_FLUSH, fs_fd(stream) };
     ssend(&req, sizeof req, FILE_SERVER);
     fs_resp_ok_t result;

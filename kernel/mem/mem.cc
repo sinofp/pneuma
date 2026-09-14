@@ -6,7 +6,29 @@
 #include <virtio.h>
 
 namespace {
+struct rsvd_region {
+    paddr_t start, end;
+};
+
+// TODO Implement some kind of std::array?
+constexpr size_t MAX_RSVD_REGIONS = 8;
+size_t rsvd_region_cnt = 0;
+rsvd_region rsvd_regions[MAX_RSVD_REGIONS];
+
 using mem::PAGE_SIZE;
+
+bool in_rsvd_regions(paddr_t start, size_t npages = 1) {
+    auto end = start + npages * PAGE_SIZE;
+    bool flag = false;
+    for (auto i = 0u; i < rsvd_region_cnt; ++i) {
+        if (auto &rsvd = rsvd_regions[i]; rsvd.start < end and start < rsvd.end) {
+            flag = true;
+            break;
+        }
+    }
+    return flag;
+}
+
 // Everything [bump_paddr, free_ram_end) will be managed by free stack
 auto bump_paddr = reinterpret_cast<paddr_t>(__free_ram);
 
@@ -22,6 +44,9 @@ paddr_t alloc_pages(size_t n) {
 
     auto paddr = bump_paddr;
     bump_paddr += n * PAGE_SIZE;
+
+    if (in_rsvd_regions(paddr, n)) [[unlikely]]
+        PANIC("alloc_pages: reached reserved memory region");
 
     if (free_ram_end < bump_paddr) [[unlikely]]
         PANIC("alloc_pages: out of memory, or called after mem::init");
@@ -67,17 +92,23 @@ frame_stack free_stack;
 
 namespace mem {
 
+void reserve(span<const uint8_t> rsvd) {
+    if (free_stack.capacity()) [[unlikely]]
+        PANIC("mem::reserve: called after mem::init");
+
+    if (MAX_RSVD_REGIONS <= rsvd_region_cnt) [[unlikely]]
+        PANIC("mem::reserve: too many reserved regions");
+
+    auto start = reinterpret_cast<paddr_t>(rsvd.data());
+    rsvd_regions[rsvd_region_cnt++] = { align_down(start, PAGE_SIZE), align_up(start + rsvd.size(), PAGE_SIZE) };
+}
+
 void init() {
     // virtq requires multiple contiguous physical pages; alloc_frame is single-page only.
     // Pre-reserve one virtq region per virtio device.
-    // Also cache device_id from MMIO since user drivers will need it
-    // and the syscall handler can't touch device MMIO after proc::create stops mapping it.
-    constexpr auto virtq_pages = align_up(sizeof(virtio::virtq), PAGE_SIZE) / PAGE_SIZE;
-    for (size_t i = 0; i < fdt::virtio_device_count; i++) {
-        fdt::virtio_devices[i].vq_paddr = alloc_pages(virtq_pages);
-        fdt::virtio_devices[i].device_id =
-            mmio::read<uint32_t>(fdt::virtio_devices[i].mmio_base, virtio::REG_DEVICE_ID);
-    }
+    for (size_t i = 0; i < fdt::dev_cnt; i++)
+        if (auto &dev = fdt::devs[i].dev; dev.device_id)
+            dev.vq_paddr = alloc_pages(virtio::virtq_pages);
 
     auto base = bump_paddr;
     auto total_bytes = free_ram_end - base;
@@ -91,12 +122,16 @@ void init() {
         // printf("The new estimation on free_stack capacity is 0x%x\n", new_pages);
     }
 
+    if (in_rsvd_regions(base, stack_bytes / PAGE_SIZE))
+        PANIC("free_stack lives in reserved memory region!");
+
     free_stack.reset({ reinterpret_cast<paddr_t *>(base), pages });
     auto page_base = base + stack_bytes;
     for (size_t i = 0; i < pages; ++i)
-        free_stack.push(page_base + i * PAGE_SIZE);
+        if (auto curr_page = page_base + i * PAGE_SIZE; !in_rsvd_regions(curr_page))
+            free_stack.push(curr_page);
 
-    // Disable alloc_pages TODO remove?
+    // Disable alloc_pages and reserve
     bump_paddr = free_ram_end;
 }
 

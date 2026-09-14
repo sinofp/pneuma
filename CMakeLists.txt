@@ -34,7 +34,9 @@ set(ARCHFLAGS --target=${PNEUMA_TARGET} -march=${PNEUMA_MARCH} -mabi=${PNEUMA_MA
 # ---------------------------------------------------------------------------
 # Flag sets other than Arch/-fPIE (which are set in toolchain).
 # ---------------------------------------------------------------------------
-set(COMMON     -g3 -Wall -Wextra
+# -Wno-missing-designated-field-initializers: omitting a field from a designated initializer is the
+# point of using one -- the omitted members are value-initialized, which is what the call sites want.
+set(COMMON     -g3 -Wall -Wextra -Wno-logical-op-parentheses -Wno-missing-designated-field-initializers
                -fno-stack-protector -fno-omit-frame-pointer -ffreestanding
                -nostdlib -nostdlibinc
                -ffunction-sections -fdata-sections)

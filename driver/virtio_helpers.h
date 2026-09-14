@@ -11,6 +11,7 @@
 
 namespace virtio {
 
+// TODO move out of virtio
 template <typename T> inline T mmio_read(unsigned long base, size_t off) {
     return *reinterpret_cast<volatile T *>(base + off);
 }
@@ -24,7 +25,7 @@ template <typename T> inline void mmio_fetch_and_or(unsigned long base, size_t o
 }
 
 inline virtq *init(unsigned long mmio_base, unsigned long vq_paddr) {
-    auto *vq = static_cast<virtq *>(mmio_map(vq_paddr, 2));
+    auto *vq = static_cast<virtq *>(mmio_map(vq_paddr, virtq_pages));
     memset(vq, 0, sizeof(virtq));
 
     mmio_write<uint32_t>(mmio_base, REG_DEVICE_STATUS, 0);
