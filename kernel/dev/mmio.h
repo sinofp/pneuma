@@ -4,6 +4,7 @@
 
 namespace mmio {
 // TODO concept to restrict T to uint32_t and uint64_t
+// TODO delete single argument version?
 template <typename T> inline auto read(paddr_t addr) { return *reinterpret_cast<volatile T *>(addr); }
 
 template <typename T> inline auto read(paddr_t base, size_t offset) { return read<T>(base + offset); }

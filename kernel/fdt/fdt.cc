@@ -12,13 +12,8 @@
 using fdt::uninitialised;
 
 namespace {
-constexpr size_t MAX_VIRTIO_DEVS = 8;
-constexpr size_t MAX_UART_DEVS = 1;
-size_t virtio_dev_cnt = 0, uart_dev_cnt = 0;
 
 constexpr uint32_t GPU_DEVICE_ID = 16;
-
-static_assert(fdt::MAX_DEVS == MAX_VIRTIO_DEVS + MAX_UART_DEVS, "devs[] must hold every kind at once");
 
 enum class FDT : uint32_t {
     MAGIC = 0xd00dfeed,
@@ -118,8 +113,8 @@ struct node_ctx {
     bool is_cpu;
     bool is_interrupt_controller;
     bool is_virtio;
-    bool is_uart;
     bool is_plic;
+    bool is_clint;
     uint64_t reg_addr = uninitialised;
     uint64_t reg_size = uninitialised;
     uint32_t reg_shift = 0;
@@ -221,26 +216,23 @@ void init(const header *fdt_ptr) {
             if (depth < 0)
                 PANIC("FDT_END_NODE before the first FDT_BEGIN_NODE");
             auto &ctx = stack[depth];
-            if (ctx.is_virtio and ctx.reg_set and ctx.irq_set and virtio_dev_cnt < MAX_VIRTIO_DEVS) {
-                if (auto device_id = mmio::read<uint32_t>(static_cast<paddr_t>(ctx.reg_addr), virtio::REG_DEVICE_ID);
-                    device_id) {
-                    ++virtio_dev_cnt;
+
+            if (ctx.compatible.data() and ctx.reg_set and ctx.irq_set and ctx.status_ok and !ctx.is_plic and
+                !ctx.is_clint and dev_cnt < MAX_DEVS) {
+                uint32_t device_id = 0;
+                if (ctx.is_virtio) {
+                    device_id = mmio::read<uint32_t>(static_cast<paddr_t>(ctx.reg_addr), virtio::REG_DEVICE_ID);
                     has_gpu |= GPU_DEVICE_ID == device_id;
+                }
+                if (!ctx.is_virtio or device_id)
+                    // TODO parse chosen and select the initialised UART using /chosen/stdout-path for UART?
                     devs[dev_cnt++] = { .dev = { .mmio_base = static_cast<paddr_t>(ctx.reg_addr),
                                                  .mmio_size = static_cast<unsigned long>(ctx.reg_size),
+                                                 .reg_shift = ctx.reg_shift,
+                                                 .reg_io_width = ctx.reg_io_width,
                                                  .irq = ctx.irq,
                                                  .device_id = device_id },
                                         .compatible = ctx.compatible };
-                }
-            } else if (ctx.is_uart and ctx.reg_set and ctx.irq_set and ctx.status_ok and uart_dev_cnt < MAX_UART_DEVS) {
-                ++uart_dev_cnt;
-                // TODO paser chosen and select the initialised UART using /chosen/stdout-path
-                devs[dev_cnt++] = { .dev = { .mmio_base = static_cast<paddr_t>(ctx.reg_addr),
-                                             .mmio_size = static_cast<unsigned long>(ctx.reg_size),
-                                             .reg_shift = ctx.reg_shift,
-                                             .reg_io_width = ctx.reg_io_width,
-                                             .irq = ctx.irq },
-                                    .compatible = ctx.compatible };
             } else if (ctx.is_plic and ctx.reg_set and ctx.irq_set) {
                 plic::start_addr = static_cast<paddr_t>(ctx.reg_addr);
                 plic::end_addr = plic::start_addr + ctx.reg_size;
@@ -302,12 +294,12 @@ void init(const header *fdt_ptr) {
                 ctx.compatible = { reinterpret_cast<const char *>(prop_data), len };
                 if (string_prop_has(ctx.compatible, "virtio,mmio"))
                     ctx.is_virtio = true;
-                else if (string_prop_has(ctx.compatible, "ns16550a") or
-                         string_prop_has(ctx.compatible, "snps,dw-apb-uart"))
-                    ctx.is_uart = true;
                 else if (string_prop_has(ctx.compatible, "riscv,plic0") or
                          string_prop_has(ctx.compatible, "sifive,plic-1.0.0"))
                     ctx.is_plic = true;
+                else if (string_prop_has(ctx.compatible, "riscv,clint0") or
+                         string_prop_has(ctx.compatible, "sifive,clint0"))
+                    ctx.is_clint = true;
                 else if (string_prop_has(ctx.compatible, "sifive,s7"))
                     ctx.is_s7 = true;
                 continue;

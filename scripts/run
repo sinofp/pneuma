@@ -311,6 +311,19 @@ if [[ $use_uboot == true && $debug == false ]] {
     ./scripts/uboot.exp $qemu ${(z)qemu_common_args} -d unimp,guest_errors,int,cpu_reset -D qemu-$model.log
 
 } elif [[ $debug == true ]] {
+    local debugger_name debugger_bin
+    if [[ $use_gdb == true ]] {
+        debugger_name="GDB"
+        debugger_bin=${commands[gdb-dashboard]:-}
+    } else {
+        debugger_name="LLDB"
+        debugger_bin=${commands[lldb]:-}
+    }
+    if [[ -z $debugger_bin ]] {
+        print "Error: ${debugger_name:l} not found on PATH"
+        exit 1
+    }
+
     print "Starting QEMU (${model:u}) with GDB server on port 1234"
 
     # Get the compilation directory from debug info for source mapping
@@ -335,30 +348,31 @@ if [[ $use_uboot == true && $debug == false ]] {
         reloc_lldb="-o 'target modules load --file ${kernel_elf:t} --slide 0xffffffffc0000000'"
     }
 
-    # Prepare debugger command
+    # Prepare debugger command. Paths are absolute because the new pane's working
+    # directory is not necessarily this one. If the debugger exits non-zero, keep
+    # the pane open so its error stays readable instead of the pane vanishing.
     local debugger_cmd
-    local debugger_name
     if [[ $use_gdb == true ]] {
-        debugger_name="GDB"
         debugger_cmd="
-            gdb-dashboard $kernel_elf \
+            $debugger_bin ${kernel_elf:a} \
                 -ex 'set confirm off' \
                 -ex 'set substitute-path $kernel_comp_dir "$PWD"' \
-                -ex 'add-symbol-file $shell_elf' \
-                -ex 'add-symbol-file $a_elf' \
-                -ex 'add-symbol-file $b_elf' \
-                -ex 'target remote localhost:1234'
+                -ex 'add-symbol-file ${shell_elf:a}' \
+                -ex 'add-symbol-file ${a_elf:a}' \
+                -ex 'add-symbol-file ${b_elf:a}' \
+                -ex 'target remote localhost:1234' \
+            || { echo '$debugger_name exited with an error; press Enter to close.'; read; }
         "
     } else {
-        debugger_name="LLDB"
         debugger_cmd="
-            lldb $kernel_elf \
+            $debugger_bin ${kernel_elf:a} \
                 -o 'settings set target.source-map $kernel_comp_dir "$PWD"' \
                 $reloc_lldb \
-                -o 'image add $shell_elf' \
-                -o 'image add $a_elf' \
-                -o 'image add $b_elf' \
-                -o 'gdb-remote localhost:1234'
+                -o 'image add ${shell_elf:a}' \
+                -o 'image add ${a_elf:a}' \
+                -o 'image add ${b_elf:a}' \
+                -o 'gdb-remote localhost:1234' \
+            || { echo '$debugger_name exited with an error; press Enter to close.'; read; }
         "
     }
 

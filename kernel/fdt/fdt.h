@@ -12,7 +12,8 @@ struct header;
 
 void init(const header *fdt_ptr);
 
-constexpr size_t MAX_DEVS = 9;
+// vf2-lite-uboot.dts has 112 compatible = "xxx";
+constexpr size_t MAX_DEVS = 128;
 extern size_t dev_cnt;
 
 struct fdt_dev_entry {
